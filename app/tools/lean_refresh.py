@@ -307,6 +307,11 @@ async def _full_refresh(client, data: dict, ctx, period: str | None = None) -> s
         "period": (data.get("period") or "") if period is None else period,
         "top_n": int(data.get("top_n") or 20),
         "fetch_public": bool(data.get("fetch_public")),
+        # This channel's own numeric id from the checkpoint being replaced
+        # -- see resolve_entity's fallback_id, for when its username has
+        # since changed or been dropped (UsernameNotOccupiedError) but the
+        # channel itself is still there under the same internal id.
+        "fallback_id": (data.get("info") or {}).get("id") or None,
     }
     payload = json.loads(await run_channel_stat(client, params, ctx))
     if payload.get("cancelled"):
@@ -324,7 +329,8 @@ async def _refresh_one(client, data: dict, ctx) -> str:
         return await _full_refresh(client, data, ctx)
 
     ref = data.get("channel") or data.get("username") or data.get("key")
-    entity = await resolve_entity(client, ref)
+    fallback_id = (data.get("info") or {}).get("id") or None
+    entity = await resolve_entity(client, ref, fallback_id)
 
     fetched = _parse_iso(data.get("fetched_at"))
     if fetched is None:

@@ -469,13 +469,17 @@ def _monthly_series(month_counts: dict[str, int], month_agg: dict[str, dict],
 
 
 async def run_channel_stat(client, p: dict, ctx) -> str:
-    """p: channel, top_n, period (PERIOD_DAYS key, '' = all), fetch_public."""
+    """p: channel, top_n, period (PERIOD_DAYS key, '' = all), fetch_public,
+    fallback_id (optional — a previously known numeric channel id, see
+    resolve_entity, passed through by lean_refresh._full_refresh when
+    re-fetching an already-tracked channel; absent for a brand-new fetch,
+    which has no prior checkpoint to draw one from)."""
     top_n = int(p.get("top_n") or 20)
     period = p.get("period") or ""
     cutoff = period_cutoff(period)
     fetch_public = bool(p.get("fetch_public"))
 
-    entity = await resolve_entity(client, p["channel"])
+    entity = await resolve_entity(client, p["channel"], p.get("fallback_id"))
     info = await _channel_info(client, entity)
     title = info["title"] or str(p["channel"])
     try:

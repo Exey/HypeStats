@@ -41,8 +41,9 @@ async def run_mentions_refresh(client, p: dict, ctx) -> str:
             continue
 
         channel_ref = data.get("channel") or data.get("username") or key
+        fallback_id = (data.get("info") or {}).get("id") or None
         try:
-            entity = await resolve_entity(client, channel_ref)
+            entity = await resolve_entity(client, channel_ref, fallback_id)
         except Exception as exc:
             ctx.log(f"  {key}: {exc}")
             ctx.progress(done, total)

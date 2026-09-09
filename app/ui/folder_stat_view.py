@@ -192,14 +192,20 @@ class FolderStatView(QWidget):
 
         self.page_scroll.setWidget(page_holder)
 
-    def mount_taxonomy_cards(self, folders_card, tags_card) -> None:
+    def mount_taxonomy_cards(self, folders_card, tags_card, mentions_export_card=None) -> None:
         """Place ConfigView's Folders and Tags cards at the top of this view
-        (they own their own logic; this view just hosts them)."""
+        (they own their own logic; this view just hosts them) — and, right
+        below that row, the Mentions export card (see
+        ConfigView._mentions_export_card), its own row rather than
+        squeezed into the first one since it's a different kind of thing
+        (a batch export, not folder/tag management)."""
         row = QHBoxLayout()
         row.setSpacing(18)
         row.addWidget(folders_card, 1)
         row.addWidget(tags_card, 1)
         self._taxonomy_lay.addLayout(row)
+        if mentions_export_card is not None:
+            self._taxonomy_lay.addWidget(mentions_export_card)
 
     def _period_card(self) -> SectionCard:
         card = SectionCard(self.tr_("folder_stat_period_title"))

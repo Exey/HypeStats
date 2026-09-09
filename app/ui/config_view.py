@@ -32,6 +32,7 @@ from ..tags import TagStore
 from ..tools.channel_stat import run_channel_stat
 from ..tools.comments_refresh import run_comments_refresh
 from ..tools.lean_refresh import run_lean_refresh
+from ..tools.mentions_export import run_link_report_export, run_mentions_report_export
 from ..tools.mentions_refresh import run_mentions_refresh
 from ..worker import CheckLoginWorker, ToolWorker
 from .dashboard_view import fmt_int
@@ -65,6 +66,9 @@ class ConfigView(QWidget):
         self.tag_store = tag_store
         self.channel_store = channel_store
         self.worker: ToolWorker | None = None
+        self._export_out_path: str | None = None  # set by a Mentions-export
+                                                    # button click, read back
+                                                    # in _finish_mentions_export
         self._build_ui()
         self._load_fields()
 
@@ -106,6 +110,10 @@ class ConfigView(QWidget):
         # Built here (this view owns all the folder/tag logic + the worker the
         # comments-refresh needs) but mounted at the top of the Folders & Tags
         # view — see MainWindow._build_ui / FolderStatView.mount_taxonomy_cards.
+        # Built before _folders_card(): its own refresh_folders_list() call
+        # at the end touches every folder-scoped combo, including this
+        # card's — it has to exist first.
+        self.mentions_export_card = self._mentions_export_card()
         self.folders_card = self._folders_card()
         self.tags_card = self._tags_card()
 
@@ -114,7 +122,8 @@ class ConfigView(QWidget):
         self._busy_btns = [self.fetch_btn, self.refresh_mentions_btn, self.refresh_comments_btn,
                            self.lean_oldest_btn, self.lean_1mo_btn, self.lean_3mo_btn,
                            self.lean_selected_btn, self.lean_selected_2y_btn,
-                           self.refetch_mentions_btn]
+                           self.lean_selected_all_btn, self.refetch_mentions_btn,
+                           self.export_link_report_btn, self.export_mentions_report_btn]
 
     def _connection_card(self) -> Card:
         card = SectionCard("Telegram")
@@ -365,6 +374,49 @@ class ConfigView(QWidget):
         self.refresh_tags_list()
         return card
 
+    def _mentions_export_card(self) -> Card:
+        """Batch export of the Mentions view's own Link report / Mentions
+        report (see app.ui.compare.mentions_view._open_link_report/
+        _open_mentions_report) for a whole folder at once — one combined
+        Markdown file, sections separated by channel title (see
+        tools.mentions_export). Pure local computation over already-stored
+        checkpoints, no live Telegram calls, but still routed through the
+        same ToolWorker as every other batch action here (Mentions report
+        runs full name extraction, real work for a large folder) — see
+        _on_export_link_report_clicked/_on_export_mentions_report_clicked."""
+        card = SectionCard(self.tr_("mentions_export_title"))
+        self.mentions_export_card_ref = card
+
+        self.mentions_export_help_lbl = QLabel(self.tr_("mentions_export_help"))
+        self.mentions_export_help_lbl.setObjectName("hint")
+        self.mentions_export_help_lbl.setWordWrap(True)
+        card.body.addWidget(self.mentions_export_help_lbl)
+
+        folder_row = QHBoxLayout()
+        self.mentions_export_folder_lbl = QLabel(self.tr_("mentions_export_folder_label"))
+        folder_row.addWidget(self.mentions_export_folder_lbl)
+        self.mentions_export_folder_combo = QComboBox()
+        folder_row.addWidget(self.mentions_export_folder_combo, 1)
+        card.body.addLayout(folder_row)
+
+        btn_row = QHBoxLayout()
+        self.export_link_report_btn = QPushButton(self.tr_("mentions_export_link_btn"))
+        self.export_link_report_btn.setToolTip(self.tr_("mentions_export_link_hint"))
+        self.export_link_report_btn.clicked.connect(self._on_export_link_report_clicked)
+        btn_row.addWidget(self.export_link_report_btn)
+        self.export_mentions_report_btn = QPushButton(self.tr_("mentions_export_mentions_btn"))
+        self.export_mentions_report_btn.setToolTip(self.tr_("mentions_export_mentions_hint"))
+        self.export_mentions_report_btn.clicked.connect(self._on_export_mentions_report_clicked)
+        btn_row.addWidget(self.export_mentions_report_btn)
+        card.body.addLayout(btn_row)
+
+        self.mentions_export_empty_lbl = QLabel(self.tr_("folder_list_empty"))
+        self.mentions_export_empty_lbl.setObjectName("hint")
+        card.body.addWidget(self.mentions_export_empty_lbl)
+
+        card.body.addStretch(1)   # keep contents top-aligned — see _folders_card
+        return card
+
     # ------------------------------------------------------- lean refresh
     def _lean_refresh_card(self) -> Card:
         """Staleness list of every tracked channel plus one-click batch
@@ -441,6 +493,10 @@ class ConfigView(QWidget):
         self.lean_selected_2y_btn.setToolTip(self.tr_("lean_refresh_selected_2y_hint"))
         self.lean_selected_2y_btn.clicked.connect(self._on_lean_refresh_selected_2y)
         btn_row.addWidget(self.lean_selected_2y_btn)
+        self.lean_selected_all_btn = QPushButton(self.tr_("lean_refresh_selected_all_btn"))
+        self.lean_selected_all_btn.setToolTip(self.tr_("lean_refresh_selected_all_hint"))
+        self.lean_selected_all_btn.clicked.connect(self._on_lean_refresh_selected_all)
+        btn_row.addWidget(self.lean_selected_all_btn)
         self.refetch_mentions_btn = QPushButton(self.tr_("lean_refetch_mentions_btn"))
         self.refetch_mentions_btn.setToolTip(self.tr_("lean_refetch_mentions_hint"))
         self.refetch_mentions_btn.clicked.connect(self._on_refetch_mentions_selected)
@@ -640,14 +696,36 @@ class ConfigView(QWidget):
             return
         self.lean_refresh(keys, full_period="2y")
 
+    def _on_lean_refresh_selected_all(self) -> None:
+        keys = self._lean_checked_keys()
+        if not keys:
+            QMessageBox.information(self, self.tr_("app_title"),
+                                   self.tr_("lean_refresh_none_selected"))
+            return
+        if self.is_running():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("worker_running"))
+            return
+        reply = QMessageBox.question(
+            self, self.tr_("app_title"),
+            self.tr_("lean_refresh_all_confirm", count=len(keys)))
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        # "all" isn't a channel_stat.PERIOD_DAYS key, so period_cutoff()
+        # falls through to its own no-cutoff default -- the same "any
+        # unrecognized/empty key means all-time" rule the whole period
+        # system already runs on, not a special case bolted on here.
+        self.lean_refresh(keys, full_period="all")
+
     def lean_refresh(self, keys: list[str], full_period: str | None = None) -> bool:
         """Start a lean (incremental) refresh of `keys` — the months since
         each was last fetched, merged in (see tools.lean_refresh). Shared by
         the Config card's batch buttons and the dashboard's Refresh button.
-        With `full_period` (a channel_stat PERIOD_DAYS key such as "2y") every
-        key is instead fully re-scanned over that window — slower, but the
-        only way to rebuild a channel's older history against current
-        per-post fields. Returns True if a worker was started."""
+        With `full_period` (a channel_stat.PERIOD_DAYS key such as "2y", or
+        "all" — deliberately not a real key, so period_cutoff() falls
+        through to no cutoff at all) every key is instead fully re-scanned
+        over that window — slower, but the only way to rebuild a channel's
+        older history against current per-post fields. Returns True if a
+        worker was started."""
         keys = [k for k in keys if k]
         if not keys:
             return False
@@ -788,6 +866,22 @@ class ConfigView(QWidget):
         self.assign_all_lbl.setVisible(has_folders)
         self.assign_all_combo.setVisible(has_folders)
         self.assign_all_btn.setVisible(has_folders)
+
+        current_export_folder_id = self.mentions_export_folder_combo.currentData()
+        self.mentions_export_folder_combo.blockSignals(True)
+        self.mentions_export_folder_combo.clear()
+        for folder in self.folder_store.list_folders():
+            self.mentions_export_folder_combo.addItem(folder["name"], folder["id"])
+        if self.mentions_export_folder_combo.count():
+            idx = self.mentions_export_folder_combo.findData(current_export_folder_id)
+            self.mentions_export_folder_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.mentions_export_folder_combo.blockSignals(False)
+        has_export_folders = self.mentions_export_folder_combo.count() > 0
+        self.mentions_export_folder_lbl.setVisible(has_export_folders)
+        self.mentions_export_folder_combo.setVisible(has_export_folders)
+        self.export_link_report_btn.setVisible(has_export_folders)
+        self.export_mentions_report_btn.setVisible(has_export_folders)
+        self.mentions_export_empty_lbl.setVisible(not has_export_folders)
 
         self.refresh_export_periods()
 
@@ -1151,11 +1245,23 @@ class ConfigView(QWidget):
         self.lean_selected_btn.setToolTip(self.tr_("lean_refresh_selected_hint"))
         self.lean_selected_2y_btn.setText(self.tr_("lean_refresh_selected_2y_btn"))
         self.lean_selected_2y_btn.setToolTip(self.tr_("lean_refresh_selected_2y_hint"))
+        self.lean_selected_all_btn.setText(self.tr_("lean_refresh_selected_all_btn"))
+        self.lean_selected_all_btn.setToolTip(self.tr_("lean_refresh_selected_all_hint"))
         self.refetch_mentions_btn.setText(self.tr_("lean_refetch_mentions_btn"))
         self.refetch_mentions_btn.setToolTip(self.tr_("lean_refetch_mentions_hint"))
         self.lean_empty_lbl.setText(self.tr_("lean_refresh_empty"))
         self._set_lean_headers()
         self.refresh_lean_list()
+
+        self.mentions_export_card_ref.title_lbl.setText(self.tr_("mentions_export_title"))
+        self.mentions_export_help_lbl.setText(self.tr_("mentions_export_help"))
+        self.mentions_export_folder_lbl.setText(self.tr_("mentions_export_folder_label"))
+        self.export_link_report_btn.setText(self.tr_("mentions_export_link_btn"))
+        self.export_link_report_btn.setToolTip(self.tr_("mentions_export_link_hint"))
+        self.export_mentions_report_btn.setText(self.tr_("mentions_export_mentions_btn"))
+        self.export_mentions_report_btn.setToolTip(self.tr_("mentions_export_mentions_hint"))
+        self.mentions_export_empty_lbl.setText(self.tr_("folder_list_empty"))
+        self.refresh_folders_list()
 
     # ------------------------------------------------------ field helpers
     def _load_fields(self) -> None:
@@ -1511,3 +1617,74 @@ class ConfigView(QWidget):
             self.checkpoints_changed.emit()
         else:
             self._append_log(self.tr_("done_fail", msg=msg))
+
+    # ------------------------------------------------------ mentions export
+    def _on_export_link_report_clicked(self) -> None:
+        self._start_mentions_export(run_link_report_export, "link_report_all.md",
+                                    "mentions_export_link_btn", self._on_mentions_export_done)
+
+    def _on_export_mentions_report_clicked(self) -> None:
+        self._start_mentions_export(
+            run_mentions_report_export, "mentions_report_all.md",
+            "mentions_export_mentions_btn", self._on_mentions_export_done)
+
+    def _start_mentions_export(self, tool_func, default_name: str, title_key: str,
+                               done_slot) -> None:
+        """Shared by both Mentions-export buttons — resolve the selected
+        folder to channel keys, ask where to save (same native save dialog
+        every other export in this app uses, see _on_export_folders_md),
+        then run `tool_func` (tools.mentions_export's two entry points) in
+        the background the same way every other batch job here does."""
+        folder_id = self.mentions_export_folder_combo.currentData()
+        if not folder_id:
+            return
+        keys = [k for k, fid in self.folder_store.assignments.items() if fid == folder_id]
+        if not keys:
+            QMessageBox.information(self, self.tr_("app_title"),
+                                   self.tr_("folder_stat_empty_channels"))
+            return
+        if self.is_running():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("worker_running"))
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, self.tr_(title_key), default_name, "Markdown (*.md)")
+        if not path:
+            return
+        self._store_fields()
+        if not self._has_conn():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("missing_conn"))
+            return
+
+        self.log_view.clear()
+        conn = {
+            "api_id": self.cfg.get("API_ID").strip(),
+            "api_hash": self.cfg.get("API_HASH").strip(),
+            "phone": self.cfg.get("PHONE_NUMBER").strip(),
+            "session": self.cfg.session_path(),
+        }
+        self._export_out_path = path
+        self.worker = ToolWorker(tool_func, {"keys": keys, "out_path": path}, conn, parent=self)
+        self.worker.sig_log.connect(self._append_log)
+        self.worker.sig_progress.connect(self._on_progress)
+        self.worker.sig_ask.connect(self._on_ask)
+        self.worker.sig_done.connect(done_slot)
+        self._set_busy(True)
+        self.progress.setRange(0, 0)
+        self.worker.start()
+
+    def _on_mentions_export_done(self, ok: bool, msg: str) -> None:
+        self._set_busy(False)
+        if self.progress.maximum() == 0:
+            self.progress.setRange(0, 1)
+            self.progress.setValue(1 if ok else 0)
+        self.worker = None
+        path, self._export_out_path = self._export_out_path, None
+        if not ok:
+            self._append_log(self.tr_("done_fail", msg=msg))
+        elif msg == "ok":
+            QMessageBox.information(self, self.tr_("app_title"), self.tr_("md_saved", path=path))
+        else:
+            # A real run that still had nothing to write (e.g. every
+            # checkpoint in the folder was missing/unreadable) — `msg`
+            # already explains why (see tools.mentions_export._run_export).
+            QMessageBox.information(self, self.tr_("app_title"), msg)

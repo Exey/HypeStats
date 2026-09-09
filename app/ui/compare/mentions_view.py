@@ -11,10 +11,13 @@ Two tiers, one scrollable page:
   are read on the same footing), the channel's post texts in scope as a
   sortable table (date / media type / text, extracted person names
   highlighted inline — see _populate_texts_table), and a staging table of
-  the names app.mentions.extract_person_names found: whether each is
-  already in mentions.md (and if not, a way to link it there), and the post
-  ids it came from (each independently clickable, hover shows the cached
-  thumbnail if one's been fetched — see _post_id_chips).
+  the names found by NER, a known-name dictionary scan, and a caption
+  pattern scan together (see _rebuild_column, and
+  app.mentions.extract_person_names/find_known_names_in_text/
+  extract_person_names_by_pattern): whether each is already in mentions.md
+  (and if not, a way to link it there), and the post ids it came from
+  (each independently clickable, hover shows the cached thumbnail if one's
+  been fetched — see _post_id_chips).
 - The mentions.md table itself (app.mentions.MentionsStore) — id / names /
   unclear links, directly editable. Autosaves on leaving the view (hideEvent)
   and via an explicit Save button that's only enabled while there are
@@ -39,8 +42,8 @@ from PySide6.QtWidgets import (
 
 from ...mentions import (
     MentionsStore, NameExceptions, canonical_link_key, classify_channel_links,
-    extract_person_names, extraction_available, find_known_names_in_text,
-    is_telegram_link, names_match, normalize_links, resolve_telegram_link, tg_identity_key,
+    extract_all_names_per_post, extraction_available, is_telegram_link, name_link_matches,
+    name_tg_links, names_match, normalize_links, resolve_telegram_link, tg_identity_key,
 )
 from ...media_cache import thumbnail_path
 from ...periods import period_key_label
@@ -155,34 +158,6 @@ def _tg_username_from_url(url: str) -> str | None:
     return f"@{path}"
 
 
-def _name_tg_links(names: list[str], links: list[dict]) -> dict[str, str]:
-    """{name: a representative t.me url} for every name in `names` that
-    matches (see app.mentions.names_match) a Telegram-domain link's anchor
-    text among `links` (already normalize_links()-d). A name backed by an
-    actual Telegram link this way is a much higher-confidence "this really
-    is a person/channel" signal than NER/dictionary-scan text alone — the
-    green Link… button (see _found_indicator) and the @username
-    pre-filled when creating a new mentions.md row for it (see
-    _link_name_new) are both built on this."""
-    out: dict[str, str] = {}
-    for link in links:
-        if not is_telegram_link(link["url"]):
-            continue
-        for name in names:
-            if name not in out and names_match(name, link["text"]):
-                out[name] = link["url"]
-    return out
-
-
-def _name_link_matches(names: list[str], links: list[dict]) -> list[tuple[str, dict]]:
-    """Every (name, link) pairing among `names`/`links` (already
-    normalize_links()-d) where the link's own anchor text names that
-    person — the same signal _name_tg_links uses for Telegram links,
-    generalized to any host so _fairness_stats can also see the
-    web-resource ("fake") case. Unlike _name_tg_links this keeps every
-    match, not just the first per name — needed for occurrence counting."""
-    return [(name, link) for link in links for name in names
-            if names_match(name, link["text"])]
 
 
 class MentionsView(QWidget):
@@ -405,10 +380,16 @@ class MentionsView(QWidget):
         lay.addLayout(cards_grid)
 
         # The two popups that used to be spanning table rows are now just
-        # two ordinary buttons side by side.
+        # ordinary buttons side by side, plus Mentions report (see
+        # _open_mentions_report) between them -- every name collected in
+        # col["name_hits"] (all three extraction passes together, not just
+        # the link-bearing ones Link report covers), one row each, with
+        # whichever link (if any) it was found credited to.
         buttons_row = QHBoxLayout()
         unresolved_btn = QPushButton()
         buttons_row.addWidget(unresolved_btn)
+        mentions_report_btn = QPushButton()
+        buttons_row.addWidget(mentions_report_btn)
         report_btn = QPushButton()
         buttons_row.addWidget(report_btn)
         lay.addLayout(buttons_row)
@@ -464,7 +445,7 @@ class MentionsView(QWidget):
               "names_table": names_table, "names_title": names_title,
               "links_title": links_title, "classify_status": classify_status_lbl,
               "stat_cards": stat_cards, "unresolved_btn": unresolved_btn,
-              "report_btn": report_btn,
+              "report_btn": report_btn, "mentions_report_btn": mentions_report_btn,
               "fairness": {}, "link_classes": None, "channel": None,
               "posts": [], "name_hits": {},          # cached between re-sorts
               "texts_sort_col": 1, "texts_sort_desc": True}   # Date, newest first
@@ -474,6 +455,7 @@ class MentionsView(QWidget):
             lambda row, _col, c=col: self._on_texts_row_double_clicked(c, row))
         report_btn.clicked.connect(lambda _=False, c=col: self._open_link_report(c))
         unresolved_btn.clicked.connect(lambda _=False, c=col: self._open_unresolved_fair_links(c))
+        mentions_report_btn.clicked.connect(lambda _=False, c=col: self._open_mentions_report(c))
         return col
 
     # ---------------------------------------------------------- translate
@@ -609,42 +591,29 @@ class MentionsView(QWidget):
 
         # Extraction happens once per (channel, period) — re-sorting the
         # texts table (see _on_texts_header_clicked) reuses this instead of
-        # re-running NER over every post again.
-        #
-        # known_candidates backstops the NER model's most common miss (a
-        # bare first name in a short, casual sentence) with a plain
-        # dictionary scan against names mentions.md already knows — see
-        # find_known_names_in_text. It can't discover someone new, only
-        # confirm a mention of someone already added.
-        known_candidates = [
-            n for row in self.mentions_store.rows
-            for n in ([row.get("id", "")] + list(row.get("names") or []))
-            if n.strip()]
+        # re-running NER over every post again. The actual 3-pass pipeline
+        # (NER, the known-name dictionary scan, the caption-pattern scan)
+        # lives in app.mentions.extract_all_names_per_post, shared with the
+        # headless batch export (see tools.mentions_export) so both run
+        # identically instead of two copies of this loop drifting apart.
         posts = self._posts_in_scope(ch)
-        by_post: list[tuple[dict, list[str]]] = []
+        all_names = extract_all_names_per_post(posts, self.mentions_store, self.name_exceptions)
+        by_post: list[tuple[dict, list[str]]] = list(zip(posts, all_names))
         name_hits: dict[str, list[int]] = {}
         name_latest_ts: dict[str, int] = {}
-        # A name backed by an actual Telegram link (see _name_tg_links) is
+        # A name backed by an actual Telegram link (see app.mentions.name_tg_links) is
         # higher-confidence than one from NER/dictionary-scan text alone —
         # tracked across every post in scope, not just one, so whichever
         # post first carries the link is what the green Link… button (see
         # _found_indicator) and its @username suggestion end up using.
         name_tg_link: dict[str, str] = {}
-        for post in posts:
-            text = (post.get("full_text") or post.get("text") or "").strip()
-            names = extract_person_names(text) if text else []
-            if text and known_candidates:
-                for extra in find_known_names_in_text(text, known_candidates):
-                    if extra not in names:
-                        names.append(extra)
-            names = self.name_exceptions.filter(names)
-            by_post.append((post, names))
+        for post, names in by_post:
             ts = int(post.get("ts", 0))
             for extracted in names:
                 name_hits.setdefault(extracted, []).append(int(post.get("id", 0)))
                 if ts > name_latest_ts.get(extracted, -1):
                     name_latest_ts[extracted] = ts
-            for name, url in _name_tg_links(names, normalize_links(post.get("links"))).items():
+            for name, url in name_tg_links(names, normalize_links(post.get("links"))).items():
                 name_tg_link.setdefault(name, url)
         col["posts"] = by_post
         col["name_hits"] = name_hits
@@ -676,12 +645,15 @@ class MentionsView(QWidget):
         self._refresh_similar_mentions()
 
     def _update_stats_table(self, col: dict) -> None:
-        """Refreshes col["stat_cards"]/the Unresolved/Link report buttons
-        from the full-history link classification (see
+        """Refreshes col["stat_cards"]/the Unresolved/Link report/Mentions
+        report buttons from the full-history link classification (see
         _classify_full_history) whenever the checkpoint has `all_links`,
         falling back to the pool-scoped _fairness_stats for one fetched
         before that field existed — called after every _rebuild_column,
-        and from retranslate() when only the display language changed."""
+        and from retranslate() when only the display language changed.
+        Mentions report's own count is just col["name_hits"]'s size — it
+        isn't classification-scoped like the other two, since it lists
+        every collected name, link or not (see _open_mentions_report)."""
         ch = col.get("channel")
         classes = self._classify_full_history(col) if ch else None
         col["link_classes"] = classes
@@ -722,10 +694,12 @@ class MentionsView(QWidget):
         col["report_btn"].setText(self.tr_("mentions_stats_report_row", count=report_count))
         col["unresolved_btn"].setText(
             self.tr_("mentions_stats_unresolved_row", count=unresolved_count))
+        col["mentions_report_btn"].setText(
+            self.tr_("mentions_report_row", count=len(col.get("name_hits") or {})))
 
     def _no_link_mention_count(self, col: dict) -> int:
         """How many of col["name_hits"]'s distinct extracted names never
-        once appeared as a link's own anchor text (see _name_link_matches)
+        once appeared as a link's own anchor text (see app.mentions.name_link_matches)
         across any of their posts — a bare narrative mention ("Вчера с ней
         снимали...") with no hyperlink backing it at all, the one mention
         shape classify_channel_links' link-based fair/fake/unresolved/promo
@@ -734,7 +708,7 @@ class MentionsView(QWidget):
         linked_names: set[str] = set()
         for post, names in col["posts"]:
             links = normalize_links(post.get("links"))
-            for name, _link in _name_link_matches(names, links):
+            for name, _link in name_link_matches(names, links):
                 linked_names.add(name)
         return sum(1 for name in col["name_hits"] if name not in linked_names)
 
@@ -868,6 +842,91 @@ class MentionsView(QWidget):
         tg = sum(1 for is_tg in seen.values() if is_tg)
         return total, tg, total - tg
 
+    def _open_mentions_report(self, col: dict) -> None:
+        """The button between Unresolved fair links and Link report —
+        every name collected in col["name_hits"] (all three extraction
+        passes together: NER, the known-name dictionary scan, and the
+        caption-pattern scan — see _rebuild_column), one row each, with
+        whichever link (if any) name_link_matches found it credited to
+        across its posts in scope, or "No link" if none of them did. Link
+        report only ever covers link-bearing mentions (its whole shape is
+        "one row per link"); this is the wider, name-first view Link
+        report can't give — including every "No link mentions" card entry,
+        not just the fair/fake/unresolved/promo ones.
+
+        Sortable the same way as Link report; clicking a colored Name cell
+        opens the first post that name was found in (its own post_ids,
+        already tracked in col["name_hits"]); Source does the same for one
+        post, or opens a pick-list of all of them for a name found in
+        several (see _open_link_report_sources — the exact same helper
+        Link report's own Source button uses); Open opens its link, for a
+        row that has one."""
+        name_hits = col.get("name_hits") or {}
+        ch = col.get("channel") or {}
+        ch_name = ch.get("title") or ch.get("channel") or "—"
+        channel_text = ch.get("channel") or ch.get("username") or ""
+        dlg = QDialog(self)
+        dlg.setWindowTitle(self.tr_("mentions_report_title", channel=ch_name))
+        dlg.resize(760, 420)
+        lay = QVBoxLayout(dlg)
+        if not name_hits:
+            lay.addWidget(QLabel(self.tr_("mentions_stats_report_empty")))
+            dlg.exec()
+            return
+
+        # name -> the first link any of its posts credited it to, if any.
+        name_link: dict[str, str | None] = dict.fromkeys(name_hits)
+        for post, names in col.get("posts") or []:
+            links = normalize_links(post.get("links"))
+            for name, link in name_link_matches(names, links):
+                if name_link.get(name) is None:
+                    name_link[name] = link["url"]
+
+        table = QTableWidget(len(name_hits), 5)
+        table.setHorizontalHeaderLabels([
+            self.tr_("mentions_col_name"), self.tr_("mentions_stats_report_col_count"),
+            self.tr_("mentions_stats_report_col_url"), "", ""])
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        table.setColumnWidth(0, 220)  # real room for a full Cyrillic ФИО
+        table.setColumnWidth(1, 60)
+        table.setColumnWidth(3, 70)
+        table.setColumnWidth(4, 70)
+        table.setEditTriggers(table.EditTrigger.NoEditTriggers)
+        table.setSortingEnabled(False)
+        no_link_text = self.tr_("mentions_report_no_link")
+        for i, name in enumerate(name_hits):
+            post_ids = name_hits[name]
+            name_item = QTableWidgetItem(name)
+            if post_ids:
+                name_item.setData(
+                    Qt.ItemDataRole.UserRole, _link_post_id(channel_text, post_ids[0]))
+                name_item.setForeground(QColor(COLORS["accent"]))
+                name_item.setToolTip(self.tr_("mentions_stats_report_name_hint"))
+            table.setItem(i, 0, name_item)
+            count_item = QTableWidgetItem()
+            count_item.setData(Qt.ItemDataRole.DisplayRole, len(post_ids))
+            table.setItem(i, 1, count_item)
+            url = name_link.get(name)
+            table.setItem(i, 2, QTableWidgetItem(url or no_link_text))
+            if url:
+                open_btn = QPushButton(self.tr_("mentions_open_link_btn"))
+                open_btn.setStyleSheet("padding: 1px 8px;")
+                open_btn.clicked.connect(lambda _=False, u=url: self._open_external_link(u))
+                table.setCellWidget(i, 3, open_btn)
+            source_btn = QPushButton(self.tr_("mentions_source_btn"))
+            source_btn.setStyleSheet("padding: 1px 8px;")
+            source_btn.setEnabled(bool(post_ids))
+            source_btn.clicked.connect(
+                lambda _=False, ids=post_ids, ct=channel_text:
+                    self._open_link_report_sources(ids, ct))
+            table.setCellWidget(i, 4, source_btn)
+        table.setSortingEnabled(True)
+        table.sortItems(1, Qt.SortOrder.DescendingOrder)
+        table.cellClicked.connect(
+            lambda row, column, t=table: self._on_report_name_clicked(t, row, column, 0))
+        lay.addWidget(table)
+        dlg.exec()
+
     def _open_link_report(self, col: dict) -> None:
         """Row 5's popup — every link classify_channel_links found in this
         column's full scanned history (see _classify_full_history),
@@ -983,7 +1042,7 @@ class MentionsView(QWidget):
                 table.setSortingEnabled(True)
                 table.sortItems(2, Qt.SortOrder.DescendingOrder)  # most-repeated first, as before
                 table.cellClicked.connect(
-                    lambda row, column, t=table: self._on_link_report_name_clicked(t, row, column))
+                    lambda row, column, t=table: self._on_report_name_clicked(t, row, column, 1))
                 lay.addWidget(table)
         else:
             counts = (col.get("fairness") or {}).get("link_counts") or {}
@@ -997,13 +1056,16 @@ class MentionsView(QWidget):
             lay.addWidget(text)
         dlg.exec()
 
-    def _on_link_report_name_clicked(self, table: QTableWidget, row: int, column: int) -> None:
-        """Column 1 (Name) of _open_link_report's table, clicked — opens
-        the original post that anchor text was extracted from, if there
-        was one to find (see classify_channel_links' "post_ids"; a row
-        with none just isn't colored/clickable in the first place, see
-        _open_link_report). Any other column does nothing."""
-        if column != 1:
+    def _on_report_name_clicked(self, table: QTableWidget, row: int, column: int,
+                                name_column: int) -> None:
+        """The Name column of _open_link_report's or _open_mentions_report's
+        table, clicked — opens the original post that name/anchor text was
+        found under, if there was one to find (a row with none just isn't
+        colored/clickable in the first place — see each popup's own
+        construction). Any other column does nothing; `name_column` is
+        which one counts as Name here (the two tables don't share a
+        layout)."""
+        if column != name_column:
             return
         item = table.item(row, column)
         link = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
@@ -1190,7 +1252,7 @@ class MentionsView(QWidget):
         unresolved: dict[str, str] = {}  # url -> a name it was seen anchoring
         for post, names in by_post:
             links = normalize_links(post.get("links"))
-            for name, link in _name_link_matches(names, links):
+            for name, link in name_link_matches(names, links):
                 url = link["url"]
                 link_counts[url] = link_counts.get(url, 0) + 1
                 if is_telegram_link(url):
@@ -1391,7 +1453,7 @@ class MentionsView(QWidget):
         type_lbl.setStyleSheet("font-size: 12px;")
         lay.addWidget(type_lbl)
         if names:
-            tg_links = _name_tg_links(names, normalize_links(post.get("links")))
+            tg_links = name_tg_links(names, normalize_links(post.get("links")))
             btn = QPushButton(self.tr_("mentions_link_btn"))
             style = "padding: 0px 6px; font-size: 12px;"
             if len(names) == 1:
@@ -1480,7 +1542,7 @@ class MentionsView(QWidget):
             return lbl
         link_style = self._FOUND_PILL_STYLE
         if tg_url:
-            # Backed by an actual Telegram link (see _name_tg_links), not
+            # Backed by an actual Telegram link (see app.mentions.name_tg_links), not
             # just NER/dictionary-scan text -- worth calling out.
             link_style += " color:#22C55E; font-weight:bold;"
         html_text = (
@@ -1588,7 +1650,7 @@ class MentionsView(QWidget):
 
     def _link_name_new(self, name: str, tg_url: str | None = None) -> None:
         # A Telegram link's own username is a much better id suggestion
-        # than the name text itself (see _name_tg_links) — "Марго" isn't a
+        # than the name text itself (see app.mentions.name_tg_links) — "Марго" isn't a
         # usable id, but "@gotomargosha" (from https://t.me/gotomargosha) is.
         suggested_id = (_tg_username_from_url(tg_url) if tg_url else None) or name
         id_, ok = QInputDialog.getText(

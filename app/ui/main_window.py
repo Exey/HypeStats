@@ -112,7 +112,8 @@ class MainWindow(QMainWindow):
         # The Folders / Tags management cards are built by ConfigView (all the
         # folder/tag logic lives there) but shown at the top of this view.
         self.folder_stat.mount_taxonomy_cards(self.config_view.folders_card,
-                                              self.config_view.tags_card)
+                                              self.config_view.tags_card,
+                                              self.config_view.mentions_export_card)
         self.compare_charts = CompareChartsView(self.i18n)
         self.content_quality = ContentQualityView(self.i18n, self.folder_store, self.store, self.cfg)
         self.mutual_pr = MutualPrView(self.i18n, self.folder_store, self.store,

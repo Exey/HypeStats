@@ -107,6 +107,14 @@ EN = {
                                      "rebuilds every month with the current "
                                      "per-post fields (reposts, buttons, "
                                      "comments). Slower than a lean refresh.",
+    "lean_refresh_selected_all_btn": "Re-fetch selected · All time",
+    "lean_refresh_selected_all_hint": "Full re-scan (not incremental) of the "
+                                      "ticked channels over their entire "
+                                      "history — rebuilds every month with "
+                                      "the current per-post fields (reposts, "
+                                      "buttons, comments). Much slower than "
+                                      "a 2-year re-fetch on a long-running "
+                                      "channel.",
     "lean_refetch_mentions_btn": "🔗 Refetch mentions",
     "lean_refetch_mentions_hint": "Re-fetch just the links (see "
                                   "tools.mentions_refresh) for the ticked "
@@ -118,12 +126,35 @@ EN = {
     "lean_refresh_confirm": "Lean-refresh {count} channel(s)?",
     "lean_refresh_full_confirm": "Full re-fetch of {count} channel(s) over the "
                                  "last 2 years? Slower than a lean refresh.",
+    "lean_refresh_all_confirm": "Full re-fetch of {count} channel(s) over "
+                                "their ENTIRE history? This can take a long "
+                                "time and use significant API quota on a "
+                                "channel with years of posts.",
     "lean_refresh_none": "Nothing that stale — every channel is more recent "
                          "than that.",
     "lean_refresh_none_selected": "Tick at least one channel in the list first.",
     "lean_refresh_empty": "No channels tracked yet.",
     "lean_refresh_col_updated": "Updated",
     "lean_refresh_col_channel": "Channel",
+    # Mentions export card (Config screen, mounted on the Folders & Tags
+    # view below the Folders/Tags cards) — batch Link report/Mentions
+    # report export for a whole folder, see tools.mentions_export.
+    "mentions_export_title": "Mentions",
+    "mentions_export_help": "Export the Mentions view's Link report or "
+                            "Mentions report for every channel in a folder "
+                            "at once — one Markdown file, sections "
+                            "separated by channel title.",
+    "mentions_export_folder_label": "Folder:",
+    "mentions_export_link_btn": "All Link Reports",
+    "mentions_export_link_hint": "Every channel's Link report (fair/fake/"
+                                 "unresolved/promo links, most-repeated "
+                                 "first) in the selected folder, combined "
+                                 "into one Markdown file.",
+    "mentions_export_mentions_btn": "All Mentions Report",
+    "mentions_export_mentions_hint": "Every channel's Mentions report "
+                                     "(every collected name, linked or "
+                                     "not) in the selected folder, "
+                                     "combined into one Markdown file.",
     # tags (Config screen's Tags card, sidebar badges, dashboard's tag button)
     "tag_section_title": "Tags",
     "tag_manage_help": "Load a Markdown table (| tag | long tag | description "
@@ -332,6 +363,9 @@ EN = {
     "mentions_card_tg_web": "Tg / Web",
     "mentions_stats_report_row": "Link report ({count}) →",
     "mentions_stats_unresolved_row": "Unresolved fair links ({count}) →",
+    "mentions_report_row": "Mentions report ({count}) →",
+    "mentions_report_title": "Mentions report — {channel}",
+    "mentions_report_no_link": "No link",
     "mentions_stats_report_title": "Link report — {channel}",
     "mentions_stats_report_empty": "No classified links in scope.",
     "mentions_stats_report_col_status": "Status",
@@ -659,6 +693,14 @@ RU = {
                                      "перестраивает все месяцы с текущими "
                                      "полями постов (репосты, кнопки, "
                                      "комментарии). Медленнее лёгкого обновления.",
+    "lean_refresh_selected_all_btn": "Пересканировать выбранные · Всё время",
+    "lean_refresh_selected_all_hint": "Полное пересканирование (не "
+                                      "инкрементное) отмеченных каналов за "
+                                      "всю историю — перестраивает все "
+                                      "месяцы с текущими полями постов "
+                                      "(репосты, кнопки, комментарии). "
+                                      "Гораздо медленнее пересканирования за "
+                                      "2 года для канала с долгой историей.",
     "lean_refetch_mentions_btn": "🔗 Обновить упоминания",
     "lean_refetch_mentions_hint": "Заново получить только ссылки для уже "
                                   "текстовых сохранённых постов отмеченных "
@@ -669,11 +711,34 @@ RU = {
     "lean_refresh_confirm": "Обновить {count} канал(ов)?",
     "lean_refresh_full_confirm": "Полное пересканирование {count} канал(ов) за "
                                  "последние 2 года? Медленнее лёгкого обновления.",
+    "lean_refresh_all_confirm": "Полное пересканирование {count} канал(ов) за "
+                               "ВСЮ историю? Это может занять много времени и "
+                               "заметно расходовать лимиты API для канала с "
+                               "многолетней историей.",
     "lean_refresh_none": "Нет настолько старых — все каналы свежее.",
     "lean_refresh_none_selected": "Отметьте в списке хотя бы один канал.",
     "lean_refresh_empty": "Пока нет отслеживаемых каналов.",
     "lean_refresh_col_updated": "Обновлён",
     "lean_refresh_col_channel": "Канал",
+    # Карточка «Упоминания» на экране настроек (Folders & Tags, под
+    # карточками Папки/Теги) — пакетный экспорт Отчёта по ссылкам/Отчёта
+    # по упоминаниям для всей папки, см. tools.mentions_export.
+    "mentions_export_title": "Упоминания",
+    "mentions_export_help": "Экспортировать Отчёт по ссылкам или Отчёт по "
+                            "упоминаниям из вида «Упоминания» сразу для "
+                            "всех каналов папки — один Markdown-файл, "
+                            "разделы по названию канала.",
+    "mentions_export_folder_label": "Папка:",
+    "mentions_export_link_btn": "Все отчёты по ссылкам",
+    "mentions_export_link_hint": "Отчёт по ссылкам (честные/ложные/"
+                                 "неразрешённые/промо-ссылки, сначала "
+                                 "самые повторяющиеся) для каждого канала "
+                                 "выбранной папки, в одном Markdown-файле.",
+    "mentions_export_mentions_btn": "Все отчёты по упоминаниям",
+    "mentions_export_mentions_hint": "Отчёт по упоминаниям (каждое "
+                                     "собранное имя, со ссылкой или без) "
+                                     "для каждого канала выбранной папки, "
+                                     "в одном Markdown-файле.",
     "folder_export_col_tag": "Тег",
     # tags (карточка «Теги» на экране настроек, значки в боковой панели,
     # кнопка тега в дашборде)
@@ -892,6 +957,9 @@ RU = {
     "mentions_card_tg_web": "Tg / Веб",
     "mentions_stats_report_row": "Отчёт по ссылкам ({count}) →",
     "mentions_stats_unresolved_row": "Неразрешённые честные ссылки ({count}) →",
+    "mentions_report_row": "Отчёт по упоминаниям ({count}) →",
+    "mentions_report_title": "Отчёт по упоминаниям — {channel}",
+    "mentions_report_no_link": "Без ссылки",
     "mentions_stats_report_title": "Отчёт по ссылкам — {channel}",
     "mentions_stats_report_empty": "В выборке нет классифицированных ссылок.",
     "mentions_stats_report_col_status": "Статус",

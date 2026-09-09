@@ -53,6 +53,19 @@ mode — a bare first name in a short, casual sentence). It doesn't help
 with a person NOT already in mentions.md; extract_person_names is still
 what finds those in the first place.
 
+extract_person_names_by_pattern is the remaining gap those two leave: a
+brand-new person, credited in a caption too terse or too oddly-shaped for
+NER to tag as PER at all and not yet in mentions.md for the dictionary
+scan to confirm either — e.g. "Модель: Алиса", "серия с Юлей", "Алиса, г.
+Москва", "Алиса @alisa_channel". A third, purely positional pass (regex,
+no model): a table of caption shapes these channels actually use (see its
+own _PATTERN_SPECS), each scored by how strong a credit signal that shape
+is, with a name candidate only surfaced above a tunable confidence floor.
+It's deliberately permissive about what counts as a "name" (any
+capitalized word) — what keeps that safe is that every hit still lands in
+the Mentions view's Names Found table for the same human Link…/Ignore
+review a NER hit gets, never written to mentions.md on its own.
+
 NameExceptions is the opposite direction — a blocklist (name_exceptions.txt,
 alongside mentions.md, plain text, one entry per line) of things
 mawo-slovnet or find_known_names_in_text found that plainly aren't a
@@ -363,13 +376,47 @@ def tg_has_post_id(url: str) -> bool:
     return len(parts) >= 2 and parts[1].isdigit()
 
 
+# A row's "id" column typed as a bare t.me/telegram.me link, with or
+# without a scheme -- see _normalize_row_identity.
+_URL_LIKE_ID_RE = re.compile(r"^(?:https?://)?(?:www\.)?(?:t\.me|telegram\.me)/", re.IGNORECASE)
+# A plausible bare Telegram username (Telegram's own rule: starts with a
+# letter, 5-32 characters total) -- as opposed to a ФИО id like "Ирина
+# Теличева", which should never get an "@" glued onto it.
+_BARE_USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{4,31}$")
+
+
+def _normalize_row_identity(raw_id: str) -> str:
+    """A mentions.md row's own "id" column, canonicalized to the same
+    "@username" (or bare internal-id) shape tg_identity_key(url) returns —
+    someone can type a row's id as "@geekography", "geekography" (no @),
+    or a full "t.me/geekography" link and mean the same channel; without
+    this only the exact "@username" spelling would ever match a link's own
+    identity in resolve_telegram_link. A ФИО id (no "@", not a link, not a
+    plausible bare username) passes through unchanged — it was never going
+    to match a Telegram identity key anyway, so there's nothing to
+    normalize."""
+    raw_id = (raw_id or "").strip()
+    if not raw_id:
+        return ""
+    if _URL_LIKE_ID_RE.match(raw_id):
+        url = raw_id if "://" in raw_id else f"https://{raw_id}"
+        return tg_identity_key(url) or raw_id
+    if raw_id.startswith("@") or raw_id.lstrip("-").isdigit():
+        return raw_id
+    if _BARE_USERNAME_RE.match(raw_id):
+        return f"@{raw_id}"
+    return raw_id
+
+
 def resolve_telegram_link(url: str, texts: list[str], store: MentionsStore) -> dict | None:
     """The mentions.md row (if any) already known for Telegram `url` --
     checked first by identity (tg_identity_key(url) against every row's
-    own id -- the only thing that works for a private channel, whose row
-    has no username to go by, just its raw internal id), then by whether
-    any of `texts` (a link's own anchor text, across every post it was
-    seen in) names a row MentionsStore.find_row already recognizes.
+    own id, normalized -- see _normalize_row_identity -- since a row's id
+    might be spelled "@user", "user", or a full t.me link; identity is the
+    only thing that works for a private channel anyway, whose row has no
+    username to go by, just its raw internal id), then by whether any of
+    `texts` (a link's own anchor text, across every post it was seen in)
+    names a row MentionsStore.find_row already recognizes.
 
     Deliberately NOT MentionsStore.find_row_by_link (an exact-url lookup
     against a row's "unclear links" column): that column is a
@@ -382,7 +429,7 @@ def resolve_telegram_link(url: str, texts: list[str], store: MentionsStore) -> d
     if key is not None:
         needle = key.casefold()
         for row in store.rows:
-            if (row.get("id") or "").strip().casefold() == needle:
+            if _normalize_row_identity(row.get("id") or "").casefold() == needle:
                 return row
     for text in texts:
         row = store.find_row(text)
@@ -406,6 +453,36 @@ def normalize_links(raw_links) -> list[dict]:
         elif isinstance(link, dict) and link.get("url"):
             out.append({"text": link.get("text") or link["url"], "url": link["url"]})
     return out
+
+
+def name_tg_links(names: list[str], links: list[dict]) -> dict[str, str]:
+    """{name: a representative t.me url} for every name in `names` that
+    matches (see names_match) a Telegram-domain link's anchor text among
+    `links` (already normalize_links()-d). A name backed by an actual
+    Telegram link this way is a much higher-confidence "this really is a
+    person/channel" signal than NER/dictionary-scan text alone —
+    app.ui.compare.mentions_view's green Link… button and the @username it
+    pre-fills when creating a new mentions.md row are both built on this."""
+    out: dict[str, str] = {}
+    for link in links:
+        if not is_telegram_link(link["url"]):
+            continue
+        for name in names:
+            if name not in out and names_match(name, link["text"]):
+                out[name] = link["url"]
+    return out
+
+
+def name_link_matches(names: list[str], links: list[dict]) -> list[tuple[str, dict]]:
+    """Every (name, link) pairing among `names`/`links` (already
+    normalize_links()-d) where the link's own anchor text names that
+    person — the same signal name_tg_links uses for Telegram links,
+    generalized to any host so app.ui.compare.mentions_view's fairness
+    stats can also see the web-resource ("fake") case. Unlike
+    name_tg_links this keeps every match, not just the first per name —
+    needed for occurrence counting."""
+    return [(name, link) for link in links for name in names
+            if names_match(name, link["text"])]
 
 
 # ------------------------------------------------------------------ store
@@ -605,6 +682,162 @@ def find_known_names_in_text(text: str, known: list[str]) -> list[str]:
     return list(found)
 
 
+# ------------------------------------------------- positional pattern scan
+# A capitalized word (Cyrillic or Latin, optionally hyphenated — "Мария",
+# "Jean-Paul") — the shape a bare first name takes in these captions, and
+# NER's most common miss (see extract_person_names' docstring: it needs
+# sentence context a caption this short often doesn't give it).
+_PAT_NAME1 = r"[А-ЯЁA-Z][а-яёa-z]+(?:-[А-ЯЁA-Z][а-яёa-z]+)?"
+# One or two such words — a first name, or a first+last (ФИО) pair, for
+# patterns explicit enough that the fuller shape is worth capturing.
+_PAT_NAME2 = rf"{_PAT_NAME1}(?:\s+{_PAT_NAME1})?"
+_PAT_CITY = _PAT_NAME1  # same shape as a name -- there's no telling them
+                        # apart syntactically, only context does that
+_PAT_DATE_NUM = r"\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?"
+_PAT_MONTH_RU = (r"январ[ьяе]|феврал[ьяе]|март[ае]?|апрел[ьяе]|ма[йея]|июн[ьяе]|"
+                r"июл[ьяе]|август[ае]?|сентябр[ьяе]|октябр[ьяе]|ноябр[ьяе]|декабр[ьяе]")
+_PAT_MONTH_OR_DATE = rf"(?:{_PAT_DATE_NUM}|(?:\d{{1,2}}\s+)?(?:{_PAT_MONTH_RU}))"
+_PAT_YEAR = r"(?:19|20)\d{2}"
+_PAT_MMYY = r"\d{1,2}/\d{2}\b"
+_PAT_EMOJI = r"[\U0001F300-\U0001FAFF☀-➿]"
+
+# (regex with exactly one capturing group around the name candidate,
+# confidence 0..1) — probability rules for the caption shapes a model/person
+# credit typically takes in these channels, ordered roughly high to low
+# confidence within each group. A pattern this permissive would be far too
+# noisy to write straight into mentions.md on its own; what makes it safe
+# is that nothing here ever is — every hit still lands in the Mentions
+# view's "Names Found" table exactly like a NER hit does, with the same
+# Link…/Ignore review a person makes the actual call on (see
+# app.ui.compare.mentions_view._rebuild_column, which is what actually
+# calls extract_person_names_by_pattern). A wrong guess costs one click on
+# Ignore, not a corrupted mentions.md row.
+_PATTERN_SPECS: list[tuple[str, float]] = [
+    # ---- explicit credit labels -- a caption deliberately crediting who's
+    # in the post, the strongest signal there is short of an actual link ----
+    (rf"\b[Мм]одель\s*:?\s*({_PAT_NAME2})", 0.9),
+    (rf"\bModel\s*:?\s*({_PAT_NAME2})", 0.9),
+    (rf"\b[Mm]d\s*[:\-]?\s*({_PAT_NAME2})", 0.85),
+    (rf"\b[Мм]астер-класс\s+({_PAT_NAME2})", 0.85),
+    (rf"\bкадре\s*:?\s+({_PAT_NAME2})", 0.85),
+    (rf"\bсерия\s+с\s+({_PAT_NAME2})", 0.85),
+    (rf"({_PAT_NAME2})\s*@\w+", 0.85),  # captioning straight to its own @username
+    # ---- softer credit-shaped wording ----
+    (rf"\bсерия\s+({_PAT_NAME2})\b", 0.6),
+    (rf"\bwith\s+({_PAT_NAME2})\b", 0.6),
+    (rf"\bс\s+({_PAT_NAME2})\b", 0.55),
+    (rf"({_PAT_NAME2})\s+(?:poses|Full)\b", 0.6),
+    (rf"({_PAT_NAME2})\s+(?:Продолжение|Полный|Вся|Больше|Актриса)\b", 0.6),
+    (rf"({_PAT_NAME2})\s+https?://\S+", 0.55),
+    (rf"{_PAT_EMOJI}\s*({_PAT_NAME1}),\s*{_PAT_MMYY}", 0.6),
+    (rf"({_PAT_NAME1})[.,]?\s*г\.\s*{_PAT_CITY}", 0.6),
+    (rf"({_PAT_NAME1})[.,]?\s+{_PAT_CITY}[.,]?\s+{_PAT_MONTH_OR_DATE}", 0.55),
+    (rf"({_PAT_NAME1})\s*-\s*{_PAT_YEAR}\b", 0.55),
+    (rf"({_PAT_NAME1})\s*/\s*{_PAT_YEAR}\b", 0.55),
+    # ---- generic trailing preposition/verb -- common words on their own,
+    # only worth much alongside other signal (or a human's own judgment) ----
+    (rf"({_PAT_NAME1})\s+(?:for|by|see|with|в)\b", 0.35),
+    (rf"({_PAT_NAME1})\s+Аппарат\b", 0.35),
+    (rf"({_PAT_NAME1})\s*[❤️🔥]", 0.35),
+    (rf"({_PAT_NAME1})\s*\|", 0.35),
+    (rf"({_PAT_NAME1})[.,]?\s+{_PAT_CITY}\b", 0.3),
+    (rf"({_PAT_NAME1})\s+{_PAT_MONTH_OR_DATE}\b", 0.3),
+    (rf"({_PAT_NAME1})\s+{_PAT_YEAR}\b", 0.3),
+    (rf"{_PAT_YEAR}\s+({_PAT_NAME1})\b", 0.3),
+    # a word ending in one of these common Russian adjective/participle
+    # suffixes, immediately before a name (e.g. "звёздная Мария") -- the
+    # suffix itself isn't captured, just used to anchor the name after it.
+    (rf"\S*(?:ная|ка|ко|ли|ал)\s+({_PAT_NAME1})\b", 0.35),
+]
+_COMPILED_PATTERNS = [(re.compile(pattern), score) for pattern, score in _PATTERN_SPECS]
+
+# Only a pattern hit at or above this confidence is surfaced by
+# extract_person_names_by_pattern's default threshold — tune here rather
+# than at every call site if the "low" tier (~0.3, the bare
+# name-next-to-a-common-word/city/year shapes) turns out worth surfacing
+# too, or the "medium" tier (~0.55-0.6) turns out too noisy on real data.
+PATTERN_MIN_CONFIDENCE = 0.5
+
+
+def pattern_name_candidates(text: str) -> list[tuple[str, float]]:
+    """Every (candidate, confidence) pattern match in `text` — see
+    _PATTERN_SPECS — deduplicated by the exact candidate text, keeping
+    each one's highest-scoring match if more than one pattern caught it.
+    Unfiltered by confidence; extract_person_names_by_pattern is the
+    thresholded, plain-list-of-names entry point everything else should
+    use — this is exposed mainly so a caller that wants to show/tune the
+    actual scores (or lower the threshold for one channel) can."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    best: dict[str, float] = {}
+    for pattern, score in _COMPILED_PATTERNS:
+        for m in pattern.finditer(text):
+            name = m.group(1).strip()
+            if name and score > best.get(name, 0.0):
+                best[name] = score
+    return list(best.items())
+
+
+def extract_person_names_by_pattern(
+        text: str, min_confidence: float = PATTERN_MIN_CONFIDENCE) -> list[str]:
+    """Person-name candidates found by *position* in `text` — a model
+    credited as "Модель: Алиса", "серия с Алисой", "Алиса, г. Москва",
+    "Алиса @alisa_channel", and the many similar caption shapes these
+    channels actually use (see _PATTERN_SPECS) — rather than by NER
+    (extract_person_names) or an exact/declined match against a name
+    mentions.md already knows (find_known_names_in_text). This is the
+    remaining gap those two leave: a brand-new person, credited in a
+    caption too terse or too oddly-shaped for the NER model to tag as PER
+    at all (its context window is basically the whole caption; "Алиса, г.
+    Москва" alone rarely reads as a name to it) and not yet in mentions.md
+    for the dictionary scan to confirm either.
+
+    Every hit is still only ever a *candidate* — see _PATTERN_SPECS' own
+    note on why a false positive here costs one Ignore click, not a
+    corrupted row. `min_confidence` filters pattern_name_candidates' raw
+    scored output; results are returned in first-seen order, matching
+    extract_person_names/find_known_names_in_text's own shape so a caller
+    can merge all three into one list the same way."""
+    return [name for name, score in pattern_name_candidates(text) if score >= min_confidence]
+
+
+def extract_all_names_per_post(
+        posts: list[dict], store: MentionsStore,
+        name_exceptions: "NameExceptions | None" = None) -> list[list[str]]:
+    """Parallel to `posts` (checkpoint rows carrying "full_text"/"text"):
+    post i's own extracted names, via all three passes together —
+    extract_person_names (NER), find_known_names_in_text (a dictionary
+    scan against mentions.md's own id/name candidates), then
+    extract_person_names_by_pattern (caption-position rules) as the last
+    resort — the exact same combined pipeline
+    app.ui.compare.mentions_view._rebuild_column runs per post for its own
+    Names Found table, factored out here so a headless batch job (see
+    tools.mentions_export) can run identically over a channel's stored
+    posts without a Qt view to drive it, rather than a second copy of this
+    loop slowly drifting out of sync with the interactive one."""
+    known_candidates = [n for row in store.rows
+                        for n in ([row.get("id", "")] + list(row.get("names") or []))
+                        if n.strip()]
+    out: list[list[str]] = []
+    for post in posts:
+        text = (post.get("full_text") or post.get("text") or "").strip()
+        if not text:
+            out.append([])
+            continue
+        names = extract_person_names(text)
+        for extra in find_known_names_in_text(text, known_candidates):
+            if extra not in names:
+                names.append(extra)
+        for extra in extract_person_names_by_pattern(text):
+            if extra not in names:
+                names.append(extra)
+        if name_exceptions is not None:
+            names = name_exceptions.filter(names)
+        out.append(names)
+    return out
+
+
 # ---------------------------------------------------------- name exceptions
 def name_exceptions_path() -> Path:
     return config_dir() / "name_exceptions.txt"
@@ -729,10 +962,13 @@ def classify_channel_links(entries: list[dict], store: MentionsStore,
 
     A non-Telegram link is checked per distinct anchor text, cheapest
     first: find_known_names_in_text (a plain dictionary scan against
-    mentions.md's own id/name candidates, no model) before falling back to
-    extract_person_names (NER) only if that finds nothing -- and this runs
-    for *every* anchor the url was ever seen under, not gated by how often
-    the url itself repeats. That matters because a channel's own repeat
+    mentions.md's own id/name candidates, no model), then
+    extract_person_names (NER) if that finds nothing, then
+    extract_person_names_by_pattern (the same caption-position rules
+    app.ui.compare.mentions_view's own third extraction pass uses) as the
+    last resort -- and this runs for *every* anchor the url was ever seen
+    under, not gated by how often the url itself repeats. That matters
+    because a channel's own repeat
     plug link is often reused, post after post, to credit whichever person
     is actually featured that time (e.g. always boosty.to/<photographer>,
     captioned with a different model's name each post) -- gating the name
@@ -813,6 +1049,17 @@ def classify_channel_links(entries: list[dict], store: MentionsStore,
             names = find_known_names_in_text(text, known_candidates)
             if not names:
                 names = extract_person_names(text)
+                if name_exceptions is not None:
+                    names = name_exceptions.filter(names)
+            if not names:
+                # Last resort, same as app.ui.compare.mentions_view's own
+                # third pass over a post's full text: an anchor whose
+                # display text is itself a longer caption-shaped phrase
+                # ("Model Alice", "Алиса, г. Москва") rather than a bare
+                # name — NER/the dictionary scan need PER-tagged or
+                # already-known text respectively, neither of which a
+                # brand-new person's odd-shaped anchor necessarily is.
+                names = extract_person_names_by_pattern(text)
                 if name_exceptions is not None:
                     names = name_exceptions.filter(names)
             if names:

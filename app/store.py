@@ -105,6 +105,15 @@ class ChannelStore:
                 # one of this app's own tracked channels, e.g. in
                 # app.ui.compare.mentions_view.
                 "channel_id": data.get("info", {}).get("id"),
+                # Cached Mentions-view "Fairness"/Ethics score, out of the
+                # fuller cache (see app.mentions.compute_channel_mentions_cache/
+                # cache_channel_mentions) -- None until it's actually been
+                # calculated once, either from the Mentions view itself or
+                # the Folders card's "Calculate Ethics" export option
+                # (app.tools.mentions_export.run_fairness_calculate).
+                # Already parsed into `data` above, so surfacing it here
+                # costs nothing extra.
+                "fairness_pct": (data.get("mentions_cache") or {}).get("fairness_pct"),
             })
         out.sort(key=lambda d: d.get("fetched_at", ""), reverse=True)
         return out

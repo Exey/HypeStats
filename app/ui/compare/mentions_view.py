@@ -41,9 +41,10 @@ from PySide6.QtWidgets import (
 )
 
 from ...mentions import (
-    MentionsStore, NameExceptions, canonical_link_key, classify_channel_links,
-    extract_all_names_per_post, extraction_available, is_telegram_link, name_link_matches,
-    name_tg_links, names_match, normalize_links, resolve_telegram_link, tg_identity_key,
+    MentionsStore, NameExceptions, apply_no_link_penalty, cache_channel_mentions,
+    canonical_link_key, classify_channel_links, extract_all_names_per_post,
+    extraction_available, is_telegram_link, name_link_matches, name_tg_links,
+    names_match, normalize_links, resolve_telegram_link, tg_identity_key,
 )
 from ...media_cache import thumbnail_path
 from ...periods import period_key_label
@@ -617,6 +618,11 @@ class MentionsView(QWidget):
                 name_tg_link.setdefault(name, url)
         col["posts"] = by_post
         col["name_hits"] = name_hits
+        # Instant first paint from whatever was last cached to disk (see
+        # _show_cached_stats), immediately overwritten below once the real,
+        # period-scoped classification finishes -- cheap and always safe to
+        # call, so no reason to gate it on anything.
+        self._show_cached_stats(col, ch)
         # Before _populate_texts_table: it colors a post's linked names by
         # col["link_classes"] (see _highlight_names_with_links), which this
         # call is what (re)computes -- running it after would color every
@@ -653,7 +659,16 @@ class MentionsView(QWidget):
         and from retranslate() when only the display language changed.
         Mentions report's own count is just col["name_hits"]'s size — it
         isn't classification-scoped like the other two, since it lists
-        every collected name, link or not (see _open_mentions_report)."""
+        every collected name, link or not (see _open_mentions_report).
+
+        Fairness gets app.mentions.apply_no_link_penalty's halving rule on
+        top (more uncredited "No Link" mentions than "Fair" ones reads as
+        much less fair in practice) — and, at All Time scope with a real
+        (not pool-fallback) classification, is cached to the checkpoint's
+        own `mentions_cache` (see _cache_fairness) so the Dashboard's Ethics
+        card, a folder's MD export, and this same view's own instant
+        first-paint (see _show_cached_stats) can show/reuse it without a
+        fresh classification having run yet."""
         ch = col.get("channel")
         classes = self._classify_full_history(col) if ch else None
         col["link_classes"] = classes
@@ -679,23 +694,77 @@ class MentionsView(QWidget):
             report_count = len(stats["link_counts"])
             unresolved_count = len(stats["unresolved"])
             fairness_pct = stats["fairness_pct"]
+        no_link_count = self._no_link_mention_count(col)
+        fairness_pct = apply_no_link_penalty(fairness_pct, no_link_count, fair)
         none_text = self.tr_("mentions_stats_none")
         cards["fairness"].set_value(f"{fairness_pct}%" if fairness_pct is not None else none_text)
         cards["fair"].set_value(str(fair))
         cards["fake"].set_value(str(fake))
-        cards["no_link"].set_value(str(self._no_link_mention_count(col)))
+        cards["no_link"].set_value(str(no_link_count))
         full = self._link_balance_stats_full(ch) if ch else None
         total, tg, web = full if full is not None else self._link_balance_stats(col["posts"])
         cards["unique"].set_value(str(total))
+        tg_pct = round(tg / total * 100) if total else None
+        web_pct = round(web / total * 100) if total else None
         cards["balance"].set_value(
-            self.tr_("mentions_stats_balance_value",
-                    tg=round(tg / total * 100), web=round(web / total * 100))
+            self.tr_("mentions_stats_balance_value", tg=tg_pct, web=web_pct)
             if total else none_text)
+        if classes is not None and ch is not None and self._selected_period == _ALL_TIME:
+            self._cache_fairness(ch, {
+                "fairness_pct": fairness_pct, "fair": fair, "fake": fake,
+                "no_link": no_link_count, "unique": total,
+                "tg_pct": tg_pct, "web_pct": web_pct,
+            })
         col["report_btn"].setText(self.tr_("mentions_stats_report_row", count=report_count))
         col["unresolved_btn"].setText(
             self.tr_("mentions_stats_unresolved_row", count=unresolved_count))
         col["mentions_report_btn"].setText(
             self.tr_("mentions_report_row", count=len(col.get("name_hits") or {})))
+
+    def _cache_fairness(self, ch: dict, cache: dict) -> None:
+        """Persists `ch`'s own Summary card values back to its checkpoint's
+        `mentions_cache` (see app.mentions.cache_channel_mentions), stamped
+        with a fresh `calculated_at`, so the Dashboard's Ethics card, a
+        folder's MD export (tools.mentions_export.run_fairness_calculate),
+        and this same view's own next cold open (_show_cached_stats) can
+        show/reuse it without a fresh classification having run yet — see
+        _update_stats_table for when this is (and isn't) called. A no-op if
+        `fairness_pct` hasn't actually changed, so switching between
+        columns/periods doesn't hit disk every time (the other, cheaper
+        fields moving on their own isn't worth a write without it)."""
+        old = ch.get("mentions_cache") or {}
+        if old.get("fairness_pct") == cache.get("fairness_pct"):
+            return
+        cache_channel_mentions(ch, cache)
+        self.channel_store.save(ch)
+
+    def _show_cached_stats(self, col: dict, ch: dict) -> None:
+        """Paints col["stat_cards"] from ch["mentions_cache"] (see
+        app.mentions.cache_channel_mentions), if there is one, before the
+        real (and, for a large channel, noticeably slower) classification
+        in _update_stats_table has had a chance to run — called first thing
+        in _rebuild_column so opening/switching to a column shows *some*
+        Summary immediately instead of a blank one, then gets silently
+        overwritten moments later with the accurate, period-scoped values.
+        Left untouched (not blanked) if there's no cache yet — the cards
+        just keep whatever they last showed until _update_stats_table
+        fills them in for real."""
+        cache = ch.get("mentions_cache")
+        if not cache:
+            return
+        cards = col["stat_cards"]
+        none_text = self.tr_("mentions_stats_none")
+        fairness_pct = cache.get("fairness_pct")
+        cards["fairness"].set_value(f"{fairness_pct}%" if fairness_pct is not None else none_text)
+        cards["fair"].set_value(str(cache.get("fair", 0)))
+        cards["fake"].set_value(str(cache.get("fake", 0)))
+        cards["no_link"].set_value(str(cache.get("no_link", 0)))
+        total = cache.get("unique") or 0
+        cards["unique"].set_value(str(total))
+        tg_pct, web_pct = cache.get("tg_pct"), cache.get("web_pct")
+        cards["balance"].set_value(
+            self.tr_("mentions_stats_balance_value", tg=tg_pct, web=web_pct)
+            if total and tg_pct is not None and web_pct is not None else none_text)
 
     def _no_link_mention_count(self, col: dict) -> int:
         """How many of col["name_hits"]'s distinct extracted names never

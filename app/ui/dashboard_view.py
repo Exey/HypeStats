@@ -27,8 +27,12 @@ from ..config import Config
 from ..errors import friendly_os_error
 from ..folders import FolderStore
 from ..media_cache import thumbnail_path
+from ..mentions import (
+    MentionsStore, NameExceptions, cache_channel_mentions, compute_channel_mentions_cache,
+)
 from ..periods import period_key_label
 from ..scoring import post_gauge_value, post_score_raw, score_tooltip
+from ..store import ChannelStore
 from ..tags import TagStore
 from ..tools.media_fetch import run_thumbnail_cache
 from ..worker import ToolWorker
@@ -55,6 +59,7 @@ _CARD_TOOLTIPS = {
     "erv_pct": "cmp_erv_pct_tip",
     "virality_index": "cmp_virality_index_tip",
     "viral_post_share": "cmp_viral_share_tip",
+    "ethics": "dash_ethics_tip",
 }
 
 
@@ -177,6 +182,7 @@ class DashboardView(QWidget):
         self.folder_store = folder_store
         self.tag_store = tag_store
         self.cfg = cfg
+        self.channel_store = ChannelStore()
         self._data: dict = {}
         self._rows: list[dict] = []
         self._channel_text = ""
@@ -271,10 +277,7 @@ class DashboardView(QWidget):
 
     def _add_stat_card_grid(self, specs: list[tuple[str, str]]) -> None:
         """Shared by _build_top_stat_cards/_build_secondary_stat_cards — one
-        row of up to 4 StatCards each. A key can repeat across the two
-        groups (e.g. "avg_views"/"avg_views2" both show the channel's
-        average views — the top row is the at-a-glance summary, the second
-        row is the fuller metrics breakdown, and it's useful in both)."""
+        row of up to 4 StatCards each."""
         grid = QGridLayout()
         grid.setHorizontalSpacing(18)
         grid.setVerticalSpacing(18)
@@ -305,7 +308,12 @@ class DashboardView(QWidget):
             ("erv_pct", "cmp_erv_pct"),
             ("virality_index", "cmp_virality_index"),
             ("viral_post_share", "cmp_viral_share"),
-            ("avg_views2", "stat_avg_views"),
+            # The Mentions view's own "Fairness" card (see
+            # app.mentions.compute_channel_mentions_cache), cached to the
+            # checkpoint and just displayed here (see _update_ethics_card)
+            # rather than recomputed on every dashboard load — a Calculate
+            # button shows in the card itself when nothing's cached yet.
+            ("ethics", "dash_ethics_title"),
             ("avg_reposts", "stat_avg_reposts"),
             ("avg_reactions", "stat_avg_reactions"),
         ])
@@ -748,7 +756,7 @@ class DashboardView(QWidget):
             spark=monthly if len(monthly) > 2 else None)
         avg_views_text = fmt_int(round(stats.get("avg_views", 0)))
         self._cards["avg_views"].set_value(avg_views_text)
-        self._cards["avg_views2"].set_value(avg_views_text)
+        self._update_ethics_card()
         self._cards["posts_per_day"].set_value(str(stats.get("avg_posts_per_day", 0)))
         self._cards["avg_reactions"].set_value(fmt_int(round(stats.get("avg_reactions", 0))))
         self._cards["avg_reposts"].set_value(fmt_int(round(stats.get("avg_reposts", 0))))
@@ -775,6 +783,51 @@ class DashboardView(QWidget):
         self._cards["erv_pct"].set_value(f"{erv_pct:.1f}%")
         self._cards["virality_index"].set_value(f"{virality_index:.2f}×")
         self._cards["viral_post_share"].set_value(f"{viral_post_share:.1f}%")
+
+    # -------------------------------------------------------------- ethics
+    def _update_ethics_card(self) -> None:
+        """Shows this channel's cached Fairness score (see
+        app.mentions.compute_channel_mentions_cache/cache_channel_mentions)
+        if there is one — the Mentions view caches it there itself (see
+        mentions_view._cache_fairness), or the Folders card's "Calculate
+        Ethics" export option does (tools.mentions_export.
+        run_fairness_calculate) — or a Calculate button, right in the
+        card, if there isn't yet."""
+        card = self._cards["ethics"]
+        cache = self._data.get("mentions_cache")
+        pct = cache.get("fairness_pct") if cache else None
+        if pct is None:
+            card.set_value("—")
+            card.set_action(self.tr_("dash_ethics_calc_btn"), self._on_calculate_ethics_clicked)
+        else:
+            card.set_value(f"{pct}%")
+            card.clear_action()
+
+    def _on_calculate_ethics_clicked(self) -> None:
+        """Runs app.mentions.compute_channel_mentions_cache for this one
+        channel right now — synchronously, same as the Mentions view's own
+        equivalent computation (_classify_full_history): a single
+        channel's worth of full-history link classification plus a
+        bounded, cheap NER pass over its rare link anchors only (see
+        classify_channel_links/extract_person_names_by_pattern), not the
+        whole-post NER sweep a folder-wide export runs — so this is fast
+        enough not to need a background worker. Caches the result back to
+        the checkpoint the same way the Mentions view does, so it doesn't
+        need recalculating again next time this channel's dashboard opens."""
+        card = self._cards["ethics"]
+        card.action_btn.setEnabled(False)
+        card.action_btn.setText(self.tr_("dash_ethics_calculating"))
+        QApplication.processEvents()
+        try:
+            cache = compute_channel_mentions_cache(self._data, MentionsStore(), NameExceptions())
+        finally:
+            card.action_btn.setEnabled(True)
+        if cache is None:
+            QMessageBox.information(self, self.tr_("app_title"), self.tr_("dash_ethics_none"))
+            return
+        cache_channel_mentions(self._data, cache)
+        self.channel_store.save(self._data)
+        self._update_ethics_card()
 
     # ------------------------------------------------------ period wording
     def _unit_word(self, n: int, unit: str) -> str:
@@ -1271,12 +1324,14 @@ class DashboardView(QWidget):
             self.tr_("col_date"), self.tr_("col_post"), self.tr_("col_views"),
             self.tr_("col_reactions"), self.tr_("col_private"), self.tr_("col_viral_rate")])
         keymap = {"members": "stat_members", "avg_views": "stat_avg_views",
-                  "avg_views2": "stat_avg_views", "posts_per_day": "stat_posts_per_day",
+                  "ethics": "dash_ethics_title", "posts_per_day": "stat_posts_per_day",
                   "avg_reactions": "stat_avg_reactions", "avg_reposts": "stat_avg_reposts",
                   "erv_pct": "cmp_erv_pct", "virality_index": "cmp_virality_index",
                   "viral_post_share": "cmp_viral_share"}
         for k, key in keymap.items():
             self._cards[k].title_lbl.setText(self.tr_(key))
+        if self._data:
+            self._update_ethics_card()  # relabels/re-shows the Calculate button too
         self._cards["total_posts"].title_lbl.setText(
             self.tr_("stat_total_posts_period",
                      period=self._period_text() if self._data else ""))

@@ -93,6 +93,7 @@ import logging
 import os
 import re
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -1073,3 +1074,111 @@ def classify_channel_links(entries: list[dict], store: MentionsStore,
         # else: no name found under any anchor, and not repeated enough to
         # read as a standing plug either -- dropped, not a mention.
     return out
+
+
+# ---------------------------------------------------- fairness ("Ethics")
+def apply_no_link_penalty(fairness_pct: int | None, no_link_count: int, fair_count: int) -> int | None:
+    """The Mentions view's "Fairness" (Dashboard/export: "Ethics") score,
+    halved when a channel's "No link mentions" (see
+    extract_all_names_per_post -- a name found in the post text with no
+    accompanying link at all) outnumber its "Fair" links (a Telegram link
+    already resolved to a mentions.md row). Crediting far more people by
+    bare, unlinked name than by an actual working link reads as much less
+    fair in practice than the plain fair/(fair+fake) ratio alone would
+    say, even when every link the channel *does* give is perfectly
+    honest -- so 100% halves to 50%, 80% to 40%, and so on.
+
+    Applied identically everywhere Fairness is computed, so the
+    interactive Mentions view (app.ui.compare.mentions_view.
+    _update_stats_table) and the headless cached value
+    (compute_channel_mentions_cache, below) never disagree. `fairness_pct` of
+    None (no fair-or-fake data to divide at all) passes through
+    unchanged — there's nothing to penalize."""
+    if fairness_pct is None or no_link_count <= fair_count:
+        return fairness_pct
+    return round(fairness_pct / 2)
+
+
+def compute_channel_mentions_cache(data: dict, store: MentionsStore,
+                                   name_exceptions: NameExceptions | None = None
+                                   ) -> dict | None:
+    """The Mentions view's own per-channel Summary cards
+    (app.ui.compare.mentions_view._update_stats_table) — Fairness, Fair,
+    Fake, No Link, Unique links, and the tg/web balance — computed
+    headlessly over a checkpoint's *entire* stored history (no period
+    scoping — there's no period picker here) rather than from the
+    interactive view. Lets the Dashboard's Ethics card, a folder's MD
+    export (see tools.mentions_export.run_fairness_calculate), and the
+    Mentions view's own instant-first-paint cache (see
+    cache_channel_mentions and mentions_view._show_cached_stats) all
+    show/reuse a channel's summary without recomputing it from scratch.
+
+    None if this checkpoint predates `all_links` entirely (nothing to
+    classify at all). Otherwise:
+
+        {"fairness_pct": int | None, "fair": int, "fake": int,
+         "no_link": int, "unique": int, "tg_pct": int | None,
+         "web_pct": int | None}
+
+    fairness_pct is None (rather than the dict itself) exactly when there's
+    no fair-or-fake data to divide — the same "—" case the interactive
+    card shows; apply_no_link_penalty's halving rule is already applied to
+    it. unique/tg_pct/web_pct are grouped case-insensitively for a
+    Telegram link the same way mentions_view._link_balance_stats_full
+    does (see canonical_link_key)."""
+    entries = data.get("all_links")
+    if entries is None:
+        return None
+    own_channel_key = tg_identity_key(data.get("link") or "")
+    classes = classify_channel_links(entries, store, name_exceptions, own_channel_key)
+    fair = sum(1 for c in classes.values() if c["status"] == "fair")
+    fake = sum(len(c.get("names") or []) for c in classes.values() if c["status"] == "fake")
+    total_ff = fair + fake
+    fairness_pct = round(fair / total_ff * 100) if total_ff else None
+
+    posts = data.get("rows") or []
+    no_link_count = 0
+    if posts:
+        all_names = extract_all_names_per_post(posts, store, name_exceptions)
+        name_hits: set[str] = set()
+        linked_names: set[str] = set()
+        for post, names in zip(posts, all_names):
+            links = normalize_links(post.get("links"))
+            name_hits.update(names)
+            for name, _link in name_link_matches(names, links):
+                linked_names.add(name)
+        no_link_count = len(name_hits - linked_names)
+    fairness_pct = apply_no_link_penalty(fairness_pct, no_link_count, fair)
+
+    seen: dict[str, bool] = {}
+    for entry in entries:
+        for link in entry.get("links") or []:
+            url = link.get("url")
+            if not url:
+                continue
+            key = canonical_link_key(url)
+            if key not in seen:
+                seen[key] = is_telegram_link(url)
+    unique = len(seen)
+    tg = sum(1 for is_tg in seen.values() if is_tg)
+    tg_pct = round(tg / unique * 100) if unique else None
+    web_pct = round((unique - tg) / unique * 100) if unique else None
+
+    return {
+        "fairness_pct": fairness_pct, "fair": fair, "fake": fake,
+        "no_link": no_link_count, "unique": unique,
+        "tg_pct": tg_pct, "web_pct": web_pct,
+    }
+
+
+def cache_channel_mentions(data: dict, cache: dict) -> None:
+    """Stamps `cache` (see compute_channel_mentions_cache) with the current
+    time and stores it as `data["mentions_cache"]` — the one place every
+    writer of this cache (mentions_view._cache_fairness, the Dashboard
+    Ethics card's "Calculate" button, tools.mentions_export.
+    run_fairness_calculate) goes through, so "when was this last
+    calculated" is never forgotten by one of them. Does not itself save
+    `data` to disk — the caller does that (it usually has other changes
+    to persist in the same write)."""
+    data["mentions_cache"] = {**cache, "calculated_at":
+                              time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}

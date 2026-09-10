@@ -62,8 +62,9 @@ can re-open any channel instantly without re-scanning Telegram.
 ### Per-channel dashboard
 
 Stat cards (members, posts, posts/day, avg views, **ERR%**, **ERV%**,
-**Virality index**, avg reposts/reactions — see
-[Stats & scoring algorithms](#stats--scoring-algorithms)), a wide activity
+**Virality index**, avg reposts/reactions, **Ethics** — the channel's cached
+mention-fairness score, or a **Calculate** button if it hasn't been scored
+yet, see [Mentions fairness (Ethics)](#mentions-fairness-ethics)), a wide activity
 trend chart with toggleable Views / Reactions / Shares / Posts / **Quality**
 lines (month or season buckets — past a 2-year displayed range, "Aug '25" /
 "Fall 2025" style labels would start crowding the axis, so they switch to a
@@ -209,12 +210,19 @@ The **Folders** and **Tags** cards sit at the top:
   from the sidebar's right-click menu, the dashboard's folder button, or the
   "assign every channel to a folder" bulk action here. The sidebar can group
   and sort by folder. Also here: a **Markdown export** (one row per channel,
-  optionally with per-period Rating / Views / Viral share).
+  optionally with per-period Rating / Views / Viral share, plus an **Ethics**
+  column), with a **Calculate Ethics** checkbox (folder selector + an **Only
+  with Tags** filter) that scores any not-yet-cached channel in scope first —
+  see [Mentions fairness (Ethics)](#mentions-fairness-ethics).
 - **Tags** — a lightweight one-tag-per-channel taxonomy loaded from a
   Markdown table (`| tag | long tag | description |`); edit the source `.md`
   and reload to change the tag set. Only the per-channel assignment is
   app-owned. A shared tag is the niche signal behind MPR Pairs (folders
   count for much less there).
+- **Mentions** — pick a folder (or all channels) and export every one of
+  their **Link report** / **Mentions report** tables (the same ones the
+  Mentions view's own popups show) into one `link_report_all.md` /
+  `mentions_report_all.md`, each channel under its own `## <title>` heading.
 
 Below that, for one folder and one period (monthly / seasonal / half-year /
 rolling-year window): **periodic stats** — per-channel views / shares /
@@ -536,6 +544,61 @@ channel's own average (not just a strict overlap of their top-2, which
 would miss a day ranked #3 for one side but still clearly above its
 average). All weights and constants are ordinary module-level values, meant
 to be retuned.
+
+### Mentions fairness (Ethics)
+
+`app/mentions.py`'s `classify_channel_links` walks a channel's *entire*
+stored link history (`all_links`, not just the sampled top-N pool) and buckets
+every distinct link (case-insensitively grouped, see `canonical_link_key`) by
+what it tells you about the person it credits:
+
+| Status | Meaning |
+| --- | --- |
+| **fair** | a Telegram link whose id is already a *different* row in `mentions.md` — the link itself proves who's being credited. |
+| **fake** | a non-Telegram (web) link anchored to a name — counted once per distinct *name* across posts, not once per link, since one repeat web link can credit many different people over time. |
+| **unresolved** | a Telegram link that isn't in `mentions.md` yet — would become "fair" the moment it's linked (see the **Unresolved fair links** popup). |
+| **promo** | the channel's own repeated self-plug link ("subscribe to us"), excluded from scoring — unless it targets a specific post, which still counts. |
+
+From those counts:
+
+- **`fairness_pct = round(fair / (fair + fake) × 100)`**, `None` if there's
+  neither a fair nor a fake link to score at all.
+- **No-link mentions** — names `extract_all_names_per_post` found (the same
+  3-tier NER / `mentions.md` dictionary / caption-pattern pipeline the Names
+  Found table uses) that never once appeared as a link's own anchor text
+  anywhere in the channel — a bare narrative credit with nothing to verify it.
+  `apply_no_link_penalty(fairness_pct, no_link_count, fair_count)` **halves**
+  `fairness_pct` once `no_link_count` exceeds `fair_count` (e.g. 100% → 50%,
+  80% → 40%) — a channel that mostly name-drops people without ever linking
+  them reads as much less fair, even if every link it *does* use is clean.
+
+`compute_channel_mentions_cache(data, mentions_store, name_exceptions)` runs
+this headlessly, all-time (unscoped by period), over one checkpoint, returning
+`fairness_pct` alongside `fair` / `fake` / `no_link` counts and the channel's
+**All unique links** / **Balance tg / web** figures — or `None` if the
+checkpoint has no `all_links` at all (pre-dates that field; needs a re-fetch).
+`cache_channel_mentions(data, cache)` stamps it with a `calculated_at`
+timestamp and writes it to the checkpoint's own `mentions_cache`, so it
+persists across restarts without the Mentions view open at all. Three places
+read/write it:
+
+- **Mentions view** — each column's Summary cards call this on every rebuild
+  (all-time scope only) and cache the result; opening or switching to a
+  column first paints instantly from whatever's already cached
+  (`_show_cached_stats`), then gets overwritten moments later once the real,
+  period-scoped classification finishes — so a heavy channel doesn't show a
+  blank Summary while it recomputes.
+- **Dashboard's Ethics card** — shows the cached `fairness_pct`, or a
+  **Calculate** button that runs it on demand if the channel has never been
+  scored.
+- **Folders & Tags → Folders card export** — an optional **Calculate
+  Ethics** checkbox (with a folder selector and an **Only with Tags**
+  filter) that runs `tools.mentions_export.run_fairness_calculate` before
+  writing the Markdown, so its own **Ethics** column has something to show.
+  Lean by default: a channel that's already cached is skipped, not
+  recomputed, so re-running this before every export is cheap once a folder's
+  been through it once (`force=True` recalculates everyone regardless, not
+  currently wired to any button).
 
 ## Requirements
 

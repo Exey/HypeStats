@@ -32,7 +32,9 @@ from ..tags import TagStore
 from ..tools.channel_stat import run_channel_stat
 from ..tools.comments_refresh import run_comments_refresh
 from ..tools.lean_refresh import run_lean_refresh
-from ..tools.mentions_export import run_link_report_export, run_mentions_report_export
+from ..tools.mentions_export import (
+    run_fairness_calculate, run_link_report_export, run_mentions_report_export,
+)
 from ..tools.mentions_refresh import run_mentions_refresh
 from ..worker import CheckLoginWorker, ToolWorker
 from .dashboard_view import fmt_int
@@ -123,7 +125,8 @@ class ConfigView(QWidget):
                            self.lean_oldest_btn, self.lean_1mo_btn, self.lean_3mo_btn,
                            self.lean_selected_btn, self.lean_selected_2y_btn,
                            self.lean_selected_all_btn, self.refetch_mentions_btn,
-                           self.export_link_report_btn, self.export_mentions_report_btn]
+                           self.export_link_report_btn, self.export_mentions_report_btn,
+                           self.folders_export_md_btn]
 
     def _connection_card(self) -> Card:
         card = SectionCard("Telegram")
@@ -322,6 +325,36 @@ class ConfigView(QWidget):
         self.refresh_export_periods()
         export_row.addWidget(self.folders_export_period_combo)
         card.body.addLayout(export_row)
+
+        # "Calculate Ethics" — the export's own "Ethics" column (see
+        # _build_folders_md) just reads each channel's *cached*
+        # fairness_pct (empty if it's never been calculated — see
+        # app.mentions.compute_channel_mentions_cache); this row is what
+        # actually (re)calculates and caches it first, for whichever
+        # channels the folder selector scopes to, before the MD gets
+        # built — see _on_export_folders_md.
+        ethics_row = QHBoxLayout()
+        self.folders_export_ethics_chk = QCheckBox(self.tr_("folder_export_ethics_chk"))
+        self.folders_export_ethics_chk.setToolTip(self.tr_("folder_export_ethics_hint"))
+        self.folders_export_ethics_chk.toggled.connect(self._on_ethics_chk_toggled)
+        ethics_row.addWidget(self.folders_export_ethics_chk)
+        self.folders_export_ethics_folder_combo = QComboBox()
+        self.folders_export_ethics_folder_combo.setToolTip(
+            self.tr_("folder_export_ethics_folder_hint"))
+        self.folders_export_ethics_folder_combo.setEnabled(
+            self.folders_export_ethics_chk.isChecked())
+        ethics_row.addWidget(self.folders_export_ethics_folder_combo, 1)
+        # Further narrows the folder scope above to just its tagged
+        # channels — e.g. "recalculate Ethics for this folder, but only
+        # the ones I've actually tagged as worth tracking closely" rather
+        # than every channel the folder happens to contain.
+        self.folders_export_ethics_tags_chk = QCheckBox(self.tr_("folder_export_ethics_tags_chk"))
+        self.folders_export_ethics_tags_chk.setToolTip(
+            self.tr_("folder_export_ethics_tags_hint"))
+        self.folders_export_ethics_tags_chk.setEnabled(
+            self.folders_export_ethics_chk.isChecked())
+        ethics_row.addWidget(self.folders_export_ethics_tags_chk)
+        card.body.addLayout(ethics_row)
 
         # Bulk move: every tracked channel into one folder at once, instead
         # of assigning them one by one from the sidebar's right-click menu —
@@ -883,6 +916,20 @@ class ConfigView(QWidget):
         self.export_mentions_report_btn.setVisible(has_export_folders)
         self.mentions_export_empty_lbl.setVisible(not has_export_folders)
 
+        # Unlike the other folder combos above, always populated (with a
+        # leading "All folders" entry, data=None) rather than hidden when
+        # there are no folders yet — "every tracked channel" stays a
+        # meaningful scope for Ethics calculation regardless.
+        current_ethics_folder_id = self.folders_export_ethics_folder_combo.currentData()
+        self.folders_export_ethics_folder_combo.blockSignals(True)
+        self.folders_export_ethics_folder_combo.clear()
+        self.folders_export_ethics_folder_combo.addItem(self.tr_("folder_export_ethics_all"), "")
+        for folder in self.folder_store.list_folders():
+            self.folders_export_ethics_folder_combo.addItem(folder["name"], folder["id"])
+        idx = self.folders_export_ethics_folder_combo.findData(current_ethics_folder_id)
+        self.folders_export_ethics_folder_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.folders_export_ethics_folder_combo.blockSignals(False)
+
         self.refresh_export_periods()
 
         folders = self.folder_store.list_folders()
@@ -966,7 +1013,8 @@ class ConfigView(QWidget):
         extra = self.folders_export_extra_chk.isChecked()
 
         headers = [self.tr_("folder_export_col_folder"), self.tr_("folder_export_col_followers"),
-                  self.tr_("folder_export_col_id"), self.tr_("folder_export_col_tag")]
+                  self.tr_("folder_export_col_id"), self.tr_("folder_export_col_tag"),
+                  self.tr_("folder_export_col_ethics")]
         if extra:
             headers += [self.tr_("col_rating"), self.tr_("col_views"),
                        self.tr_("col_viral_share"), self.tr_("col_post_quality")]
@@ -993,7 +1041,13 @@ class ConfigView(QWidget):
                 title = (ch.get("title") or ch["key"]).replace("|", "")
                 ident = f"{title[:18]}({ch['key']})"
             tag = self.tag_store.tag_for_channel(ch["key"]) or ""
-            row = [folder, fmt_int(ch.get("members", 0)), ident, tag]
+            # Cached value only (see ChannelStore.list()'s own
+            # "fairness_pct") — never recomputed here; blank, not "—",
+            # when it's never been calculated at all, so it visibly
+            # differs from the "extra" columns' "not enabled" placeholder.
+            fairness_pct = ch.get("fairness_pct")
+            ethics = f"{fairness_pct}%" if fairness_pct is not None else ""
+            row = [folder, fmt_int(ch.get("members", 0)), ident, tag, ethics]
             if extra:
                 metrics = metrics_by_key.get(ch["key"])
                 if metrics is None:
@@ -1154,10 +1208,77 @@ class ConfigView(QWidget):
             "quality_display": quality_display,
         }
 
+    def _on_ethics_chk_toggled(self, on: bool) -> None:
+        self.folders_export_ethics_folder_combo.setEnabled(on)
+        self.folders_export_ethics_tags_chk.setEnabled(on)
+
     def _on_export_folders_md(self) -> None:
+        """"Calculate Ethics" unchecked: exports immediately (fast — every
+        column, including Ethics, just reads whatever's already cached/in
+        each channel's summary, see _build_folders_md). Checked: runs
+        tools.mentions_export.run_fairness_calculate first, scoped to the
+        folder selector next to the checkbox (or every tracked channel),
+        further narrowed to just tagged channels if "Only with Tags" is
+        also checked (self.tag_store.tag_for_channel) — caching a fresh
+        Ethics value to each one's checkpoint. The export itself only
+        happens once that background job finishes (see
+        _on_ethics_calc_then_export_md), since the whole point was to
+        freshen the column before it gets read."""
         if not self.channel_store.list():
             QMessageBox.information(self, self.tr_("app_title"), self.tr_("report_empty"))
             return
+        if not self.folders_export_ethics_chk.isChecked():
+            self._save_folders_md()
+            return
+
+        if self.is_running():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("worker_running"))
+            return
+        folder_id = self.folders_export_ethics_folder_combo.currentData()
+        if folder_id:
+            keys = [k for k, fid in self.folder_store.assignments.items() if fid == folder_id]
+        else:
+            keys = [ch["key"] for ch in self.channel_store.list()]
+        if self.folders_export_ethics_tags_chk.isChecked():
+            keys = [k for k in keys if self.tag_store.tag_for_channel(k)]
+        if not keys:
+            QMessageBox.information(self, self.tr_("app_title"),
+                                   self.tr_("folder_stat_empty_channels"))
+            return
+        self._store_fields()
+        if not self._has_conn():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("missing_conn"))
+            return
+
+        self.log_view.clear()
+        conn = {
+            "api_id": self.cfg.get("API_ID").strip(),
+            "api_hash": self.cfg.get("API_HASH").strip(),
+            "phone": self.cfg.get("PHONE_NUMBER").strip(),
+            "session": self.cfg.session_path(),
+        }
+        self.worker = ToolWorker(run_fairness_calculate, {"keys": keys}, conn, parent=self)
+        self.worker.sig_log.connect(self._append_log)
+        self.worker.sig_progress.connect(self._on_progress)
+        self.worker.sig_ask.connect(self._on_ask)
+        self.worker.sig_done.connect(self._on_ethics_calc_then_export_md)
+        self._set_busy(True)
+        self.progress.setRange(0, 0)
+        self.worker.start()
+
+    def _on_ethics_calc_then_export_md(self, ok: bool, msg: str) -> None:
+        self._set_busy(False)
+        if self.progress.maximum() == 0:
+            self.progress.setRange(0, 1)
+            self.progress.setValue(1 if ok else 0)
+        self.worker = None
+        if not ok:
+            self._append_log(self.tr_("done_fail", msg=msg))
+            return
+        self.checkpoints_changed.emit()
+        self._save_folders_md()
+
+    def _save_folders_md(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
             self, self.tr_("folder_export_md_btn"), "folders.md", "Markdown (*.md)")
         if not path:
@@ -1219,6 +1340,15 @@ class ConfigView(QWidget):
         self.folders_export_extra_chk.setToolTip(self.tr_("folder_export_extra_cols_hint"))
         self.folders_export_period_combo.setToolTip(self.tr_("folder_export_period_hint"))
         self.refresh_export_periods()
+        self.folders_export_ethics_chk.setText(self.tr_("folder_export_ethics_chk"))
+        self.folders_export_ethics_chk.setToolTip(self.tr_("folder_export_ethics_hint"))
+        self.folders_export_ethics_folder_combo.setToolTip(
+            self.tr_("folder_export_ethics_folder_hint"))
+        self.folders_export_ethics_folder_combo.setItemText(
+            0, self.tr_("folder_export_ethics_all"))
+        self.folders_export_ethics_tags_chk.setText(self.tr_("folder_export_ethics_tags_chk"))
+        self.folders_export_ethics_tags_chk.setToolTip(
+            self.tr_("folder_export_ethics_tags_hint"))
         self.comments_refresh_lbl.setText(self.tr_("folder_comments_refresh_label"))
         self.refresh_comments_btn.setText(self.tr_("folder_comments_refresh_btn"))
         self.refresh_comments_btn.setToolTip(self.tr_("folder_comments_refresh_hint"))

@@ -59,6 +59,24 @@ EN = {
                                  "computed over — the channel's most recent "
                                  "half-year or season, or its whole "
                                  "all-time stats.",
+    "folder_export_ethics_chk": "Calculate Ethics",
+    "folder_export_ethics_hint": "Before exporting, (re)calculate each "
+                                 "in-scope channel's Ethics score (see the "
+                                 "Mentions view's own \"Ethics\" card) "
+                                 "and cache it to its checkpoint — runs a "
+                                 "background job first, since it scans "
+                                 "every scanned post's links. Leave "
+                                 "unchecked to just export whatever's "
+                                 "already cached (blank for a channel "
+                                 "that's never had it calculated).",
+    "folder_export_ethics_folder_hint": "Which channels to (re)calculate "
+                                        "Ethics for.",
+    "folder_export_ethics_all": "All channels",
+    "folder_export_ethics_tags_chk": "Only with Tags",
+    "folder_export_ethics_tags_hint": "Further narrow the scope above to "
+                                      "just channels that already have a "
+                                      "tag assigned (any tag).",
+    "folder_export_col_ethics": "Ethics",
     "folder_mentions_refresh_label": "Refresh mentions for:",
     "folder_mentions_refresh_btn": "🔗 Refresh mentions",
     "folder_mentions_refresh_hint": "Re-fetch just the links in every "
@@ -355,7 +373,7 @@ EN = {
     "mentions_stats_classifying": "Classifying links…",
     "mentions_stats_balance_value": "{tg}%/{web}%",
     "mentions_stats_none": "—",
-    "mentions_card_fairness": "Fairness",
+    "mentions_card_fairness": "Ethics",
     "mentions_card_fair": "Fair",
     "mentions_card_fake": "Fake",
     "mentions_card_no_link": "No Link",
@@ -545,6 +563,18 @@ EN = {
     "cmp_viral_share": "Viral post share",
     "cmp_viral_share_tip": "The percentage of posts that received more than "
                            "2× the average number of views.",
+    "dash_ethics_title": "Ethics",
+    "dash_ethics_tip": "The Mentions view's own \"Ethics\" score, cached "
+                      "here — fair (Telegram-linked) mentions as a share "
+                      "of fair+fake, halved if uncredited \"No Link\" "
+                      "mentions outnumber the fair ones. Not calculated "
+                      "yet? Press Calculate below.",
+    "dash_ethics_calc_btn": "Calculate",
+    "dash_ethics_calculating": "Calculating…",
+    "dash_ethics_none": "Not enough link data to calculate Ethics for this "
+                        "channel — it may predate `all_links`, need a "
+                        "re-fetch, or simply have no fair/fake mentions "
+                        "in its stored history.",
     # charts
     "chart_trend_title": "Views / Reactions / Shares / Posts over time",
     "chart_quality": "Quality",
@@ -648,6 +678,26 @@ RU = {
                                  "Просмотры/Долю виральных — последнее "
                                  "полугодие или сезон канала, либо вся "
                                  "статистика за всё время.",
+    "folder_export_ethics_chk": "Рассчитать Этику",
+    "folder_export_ethics_hint": "Перед экспортом (пере)рассчитать Этику "
+                                 "(см. собственную карточку «Этика» "
+                                 "вида «Упоминания») для каждого канала в "
+                                 "выборке и закешировать в его чекпоинт — "
+                                 "сначала запускается фоновая задача, "
+                                 "так как она сканирует ссылки во всех "
+                                 "просканированных постах. Оставьте "
+                                 "не отмеченным, чтобы просто "
+                                 "экспортировать уже закешированное "
+                                 "(пусто для канала, для которого это "
+                                 "никогда не рассчитывалось).",
+    "folder_export_ethics_folder_hint": "Для каких каналов "
+                                        "(пере)рассчитать Этику.",
+    "folder_export_ethics_all": "Все каналы",
+    "folder_export_ethics_tags_chk": "Только с тегами",
+    "folder_export_ethics_tags_hint": "Дополнительно сузить выборку выше "
+                                      "до каналов, у которых уже есть "
+                                      "тег (любой).",
+    "folder_export_col_ethics": "Этика",
     "folder_mentions_refresh_label": "Обновить ссылки для:",
     "folder_mentions_refresh_btn": "🔗 Обновить ссылки",
     "folder_mentions_refresh_hint": "Заново получить только ссылки для "
@@ -949,7 +999,7 @@ RU = {
     "mentions_stats_classifying": "Классификация ссылок…",
     "mentions_stats_balance_value": "{tg}%/{web}%",
     "mentions_stats_none": "—",
-    "mentions_card_fairness": "Честность",
+    "mentions_card_fairness": "Этика",
     "mentions_card_fair": "Честные",
     "mentions_card_fake": "Ложные",
     "mentions_card_no_link": "Без ссылки",
@@ -1131,6 +1181,20 @@ RU = {
     "cmp_viral_share": "Доля вирусных постов",
     "cmp_viral_share_tip": "Процент постов, набравших более чем в 2 раза "
                            "больше среднего числа просмотров.",
+    "dash_ethics_title": "Этика",
+    "dash_ethics_tip": "Собственная «Этика» из вида «Упоминания», "
+                      "кешированная здесь — доля честных (со ссылкой в "
+                      "Telegram) упоминаний среди честных+ложных, "
+                      "уменьшенная вдвое, если неотмеченных «Без ссылки» "
+                      "упоминаний больше, чем честных. Ещё не "
+                      "рассчитано? Нажмите «Рассчитать» ниже.",
+    "dash_ethics_calc_btn": "Рассчитать",
+    "dash_ethics_calculating": "Расчёт…",
+    "dash_ethics_none": "Недостаточно данных по ссылкам, чтобы "
+                        "рассчитать Этику для этого канала — возможно, "
+                        "он старше поля `all_links`, нужно "
+                        "пересканировать, или в сохранённой истории "
+                        "просто нет честных/ложных упоминаний.",
     "chart_trend_title": "Просмотры / Реакции / Репосты / Посты по времени",
     "chart_quality": "Качество",
     "chart_posts": "Посты",

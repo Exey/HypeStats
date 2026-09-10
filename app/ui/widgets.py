@@ -258,6 +258,17 @@ class StatCard(Card):
         self.spark = Sparkline(spark or [], accent=accent or COLORS["accent"])
         self.spark.setVisible(bool(spark))
         lay.addWidget(self.spark)
+
+        # Hidden until set_action() gives it something to do — e.g. the
+        # Dashboard's Ethics card, whose value isn't always cached yet
+        # (see app.ui.dashboard_view._update_ethics_card): "Calculate"
+        # lives right here instead of a separate control elsewhere on the
+        # page, since it's specific to this one card's own value.
+        self.action_btn = QPushButton()
+        self.action_btn.setStyleSheet("padding: 2px 8px; font-size: 11px;")
+        self.action_btn.setVisible(False)
+        lay.addWidget(self.action_btn)
+
         lay.addStretch()
         self.setMinimumHeight(132)
 
@@ -272,6 +283,22 @@ class StatCard(Card):
         if spark is not None:
             self.spark.set_data(spark)
             self.spark.setVisible(bool(spark))
+
+    def set_action(self, text: str, on_click) -> None:
+        """Shows action_btn with `text`, calling `on_click` (no args) when
+        clicked — replaces whatever action was connected before, so this
+        is safe to call again (e.g. to relabel it "Calculating…" and
+        disable it for the duration, see DashboardView._on_calculate_ethics)."""
+        self.action_btn.setText(text)
+        try:
+            self.action_btn.clicked.disconnect()
+        except (TypeError, RuntimeError):
+            pass  # nothing connected yet
+        self.action_btn.clicked.connect(on_click)
+        self.action_btn.setVisible(True)
+
+    def clear_action(self) -> None:
+        self.action_btn.setVisible(False)
 
     def set_compact(self, on: bool = True) -> None:
         """Tighter padding + smaller type — used by compare mode, where each

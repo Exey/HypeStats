@@ -29,6 +29,7 @@ from ..folders import FolderStore
 from ..media_cache import thumbnail_path
 from ..mentions import (
     MentionsStore, NameExceptions, cache_channel_mentions, compute_channel_mentions_cache,
+    mentions_cache_calculated,
 )
 from ..periods import period_key_label
 from ..scoring import post_gauge_value, post_score_raw, score_tooltip
@@ -794,14 +795,19 @@ class DashboardView(QWidget):
         run_fairness_calculate) — or a Calculate button, right in the
         card, if there isn't yet."""
         card = self._cards["ethics"]
-        cache = self._data.get("mentions_cache")
-        pct = cache.get("fairness_pct") if cache else None
-        if pct is None:
+        cache = self._data.get("mentions_cache") or {}
+        pct = cache.get("fairness_pct")
+        if mentions_cache_calculated(self._data):
+            # Calculated — show the score, or "—" when the channel simply
+            # has no fair/fake links to score. Keep a Recalculate button:
+            # the batch job (run_fairness_calculate) skips an already-done
+            # channel, so this is the only way to refresh one whose posts
+            # or mentions.md moved on since.
+            card.set_value(f"{pct}%" if pct is not None else "—")
+            card.set_action(self.tr_("dash_ethics_recalc_btn"), self._on_calculate_ethics_clicked)
+        else:
             card.set_value("—")
             card.set_action(self.tr_("dash_ethics_calc_btn"), self._on_calculate_ethics_clicked)
-        else:
-            card.set_value(f"{pct}%")
-            card.clear_action()
 
     def _on_calculate_ethics_clicked(self) -> None:
         """Runs app.mentions.compute_channel_mentions_cache for this one
@@ -823,6 +829,7 @@ class DashboardView(QWidget):
         finally:
             card.action_btn.setEnabled(True)
         if cache is None:
+            self._update_ethics_card()  # restore the button's label
             QMessageBox.information(self, self.tr_("app_title"), self.tr_("dash_ethics_none"))
             return
         cache_channel_mentions(self._data, cache)

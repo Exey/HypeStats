@@ -19,10 +19,12 @@ here, and "the channel's whole stored history" is the one sensible default
 for an export meant to be read outside the app."""
 from __future__ import annotations
 
+import time
+
 from ..mentions import (
     MentionsStore, NameExceptions, cache_channel_mentions, classify_channel_links,
-    compute_channel_mentions_cache, extract_all_names_per_post, name_link_matches,
-    normalize_links, tg_identity_key,
+    compute_channel_mentions_cache, extract_all_names_per_post,
+    mentions_cache_calculated, name_link_matches, normalize_links, tg_identity_key,
 )
 from ..store import ChannelStore
 
@@ -173,9 +175,12 @@ async def run_fairness_calculate(client, p: dict, ctx) -> str:
     """p: {"keys": [ChannelStore key, ...]}, {"force": bool} (default
     False). Calculates and caches `data["mentions_cache"]` (see
     app.mentions.compute_channel_mentions_cache/cache_channel_mentions)
-    for every key that doesn't already have a cached Fairness value,
-    saving each checkpoint back to disk as it finishes — lean by default,
-    same spirit as tools.lean_refresh: a
+    for every key that hasn't been calculated yet (keyed on the cache's
+    `calculated_at` stamp, see app.mentions.mentions_cache_calculated — NOT
+    on whether it produced a Fairness percentage: a channel with no
+    fair/fake links caches a real "—" result and must still count as done,
+    or it recomputes on every pass), saving each checkpoint back to disk as
+    it finishes — lean by default, same spirit as tools.lean_refresh: a
     channel that's already been calculated is skipped rather than redone
     for nothing, so re-running this (e.g. before every "Export to MD") is
     cheap once a folder's already been through it once. `force=True`
@@ -208,21 +213,26 @@ async def run_fairness_calculate(client, p: dict, ctx) -> str:
             ctx.progress(i, total)
             continue
         title = data.get("title") or key
-        cached = data.get("mentions_cache") or {}
-        if not force and cached.get("fairness_pct") is not None:
+        if not force and mentions_cache_calculated(data):
             skipped += 1
-            ctx.log(f"  {title}: already calculated ({cached['fairness_pct']}%), skipped.")
+            pct = (data.get("mentions_cache") or {}).get("fairness_pct")
+            ctx.log(f"  {title}: already calculated ({pct}%), skipped."
+                    if pct is not None else f"  {title}: already calculated (—), skipped.")
             ctx.progress(i, total)
             continue
+        ctx.log(f"  {title}: calculating…")
+        t0 = time.monotonic()
         cache = compute_channel_mentions_cache(data, mentions_store, name_exceptions)
+        elapsed = time.monotonic() - t0
         if cache is None:
-            ctx.log(f"  {title}: not enough data to calculate.")
+            ctx.log(f"  {title}: not enough data to calculate ({elapsed:.1f}s).")
         else:
             cache_channel_mentions(data, cache)
             store.save(data)
             done += 1
             pct = cache["fairness_pct"]
-            ctx.log(f"  {title}: {pct}%." if pct is not None else f"  {title}: cached (—).")
+            ctx.log(f"  {title}: {pct}% ({elapsed:.1f}s)." if pct is not None
+                    else f"  {title}: — ({elapsed:.1f}s).")
         ctx.progress(i, total)
 
     if ctx.cancelled():

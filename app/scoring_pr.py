@@ -79,6 +79,15 @@ ad_forecast_range() reports a low/high band alongside the point estimate
 — a crude, honestly-labeled uncertainty range (not a fitted statistical
 interval, since there's no outcome data yet to fit one against) reflecting
 the two dominant unverified constants above.
+
+Everything above forecasts off `avg_views_settled`, a lifetime average, so
+a channel that used to be busy and has since gone quiet would otherwise
+still forecast — and rank, sorted best-first by 24h forecast — off its old
+reach. ad_forecast's own `activity_trend` argument cuts the whole forecast
+by the same year-over-year decline penalty a channel's Rating already
+takes (app.rating.activity_trend_penalty) — the caller
+(app.ui.mutual_pr_view) supplies app.activity.channel_activity_trend's own
+verdict for it.
 """
 from __future__ import annotations
 
@@ -87,6 +96,7 @@ import re
 from datetime import datetime
 
 from .periods import year_window_cutoff
+from .rating import activity_trend_penalty
 from .scoring import post_gauge_value, post_score_raw
 
 # Link-detection regexes adapted from tg-super-admin's app/tools/
@@ -427,7 +437,8 @@ def size_forecast_multiplier(followers: int) -> float:
 def ad_forecast(avg_views_settled: float, interest_gauge: float,
                 avg_posts_per_day: float, total_posts: int = 0,
                 followers: int = 0, viral_post_share: float = 0.0,
-                rows: list[dict] | None = None) -> dict[str, float]:
+                rows: list[dict] | None = None,
+                activity_trend: dict | None = None) -> dict[str, float]:
     """Estimated *new followers* gained by each horizon after an ad post.
 
     One fixed total — reach_basis(avg_views_settled, followers) ×
@@ -441,7 +452,19 @@ def ad_forecast(avg_views_settled: float, interest_gauge: float,
     than the total itself. link_behavior_factor(rows), when the caller has
     post text to check, is the one true multiplier on top — it reflects
     the *content* of an ad post, not a reshaping of reach over time, so it
-    scales the whole curve evenly."""
+    scales the whole curve evenly.
+
+    `avg_views_settled` is a lifetime average, so a channel that used to be
+    busy and has since gone quiet still forecasts off its old reach —
+    exactly the "abandoned channel at the top of Mutual PR" problem.
+    `activity_trend` (app.activity.channel_activity_trend's own return
+    dict, or None) applies the same year-over-year decline cut everywhere
+    else in this app: app.rating.activity_trend_penalty, so a `slowing` /
+    `stalling` / `abandoned` channel's forecast — and everything downstream
+    of it (the main table's default 24h sort, repeated_post_forecast,
+    quality_parity/day_overlap on the MPR Pairs side) — is discounted the
+    same way its Rating already is. Applied last, evenly across every
+    horizon, same as link_behavior_factor."""
     reach, was_capped = reach_basis(avg_views_settled, followers)
     rate = follow_conversion_rate(interest_gauge, followers)
     boost = viral_boost(viral_post_share, followers, was_capped)
@@ -450,6 +473,9 @@ def ad_forecast(avg_views_settled: float, interest_gauge: float,
     forecast = {horizon: total * fraction for horizon, fraction in curve.items()}
     if rows is not None:
         factor = link_behavior_factor(rows)
+        forecast = {horizon: value * factor for horizon, value in forecast.items()}
+    if activity_trend is not None:
+        factor = 1.0 - activity_trend_penalty(activity_trend)
         forecast = {horizon: value * factor for horizon, value in forecast.items()}
     return forecast
 
@@ -552,6 +578,16 @@ MUTUAL_PR_FOLDER_NICHE = 0.30
 # from going negative. 100× ≈ a 5k channel paired with a 500k one.
 MUTUAL_PR_SIZE_MAX_RATIO = 100.0
 
+# Two channels within this many followers of each other (absolute, not
+# ratio) always score a full size_parity, regardless of what the log-ratio
+# below would say — without it, a modest absolute gap between two small
+# channels reads as a severe mismatch purely because the *ratio* is large
+# (300 vs 1300 followers is a 4.3× ratio, the same as 40k vs 172k), even
+# though they're obviously the same tier. Widens how many close-in-size
+# pairs clear MUTUAL_PR_MIN_SCORE, on top of whatever the Channel links
+# card's own exclusion already surfaces (see app.ui.mutual_pr_view).
+MUTUAL_PR_SIZE_WINDOW = 2000
+
 # The MPR Pairs table (UI card and Markdown export) lists every pair scoring
 # at or above this, best first, capped at MUTUAL_PR_MAX_PAIRS. The score
 # floor is intentionally low — the table is sorted best-first, so a weak
@@ -559,19 +595,34 @@ MUTUAL_PR_SIZE_MAX_RATIO = 100.0
 MUTUAL_PR_MIN_SCORE = 0.51
 MUTUAL_PR_MAX_PAIRS = 500
 
+# Once ranked, at most this many of any one channel's own best pairs survive
+# (see rank_mutual_pr_pairs's max_per_channel) — otherwise a channel that
+# scores well against nearly everyone (a big generalist, say) can crowd the
+# whole table with itself, burying pairs that don't involve it at all.
+MUTUAL_PR_MAX_PAIRS_PER_CHANNEL = 10
+
 # How many "works well for both channels" weekdays mutual_best_days returns
 # (the ★ days in the MPR Pairs "best days" column).
 MUTUAL_BEST_DAYS_TOP_N = 2
 
 
 def size_parity(followers_a: int, followers_b: int,
-                max_ratio: float = MUTUAL_PR_SIZE_MAX_RATIO) -> float:
+                max_ratio: float = MUTUAL_PR_SIZE_MAX_RATIO,
+                window: int = MUTUAL_PR_SIZE_WINDOW) -> float:
     """1.0 when both channels are the same size, ramping down to 0.0 (and
     clamped there) once one is `max_ratio`× the other. Log-scaled, so a
     10k/20k pair and a 100k/200k pair score the same — a 2× size gap is a
-    2× gap regardless of the absolute numbers."""
+    2× gap regardless of the absolute numbers.
+
+    Overridden to a flat 1.0 first, though, whenever the two are within
+    `window` followers of each other in absolute terms (MUTUAL_PR_SIZE_WINDOW)
+    — the log-ratio above is otherwise unkind to small channels, where even
+    a trivial headcount gap is a large *ratio* (300 vs 1300 followers scores
+    the same as 40k vs 172k without this)."""
     a = max(int(followers_a or 0), 1)
     b = max(int(followers_b or 0), 1)
+    if abs(a - b) <= window:
+        return 1.0
     span = math.log10(max_ratio) or 1.0
     return max(0.0, 1.0 - abs(math.log10(a) - math.log10(b)) / span)
 
@@ -658,21 +709,57 @@ def mutual_pr_pair_score(followers_a: int, followers_b: int,
             "niche": na, "score": score}
 
 
+def _cap_pairs_per_channel(ranked: list[dict], max_per_channel: int) -> list[dict]:
+    """`ranked` (already best-first) with every channel's own appearances
+    capped at `max_per_channel` — processed in score order, so whatever
+    survives for a given channel really is its own top N, not an arbitrary
+    subset. A pair is dropped the moment *either* side has already hit its
+    cap, so one especially compatible channel can't crowd out pairs that
+    don't involve it, and a pair's ranking still reflects both sides having
+    room left."""
+    counts: dict[str, int] = {}
+    kept: list[dict] = []
+    for p in ranked:
+        key_a, key_b = p["a"].get("key"), p["b"].get("key")
+        if counts.get(key_a, 0) >= max_per_channel or counts.get(key_b, 0) >= max_per_channel:
+            continue
+        counts[key_a] = counts.get(key_a, 0) + 1
+        counts[key_b] = counts.get(key_b, 0) + 1
+        kept.append(p)
+    return kept
+
+
 def rank_mutual_pr_pairs(channels: list[dict],
                          min_score: float = MUTUAL_PR_MIN_SCORE,
-                         max_pairs: int = MUTUAL_PR_MAX_PAIRS) -> list[dict]:
+                         max_pairs: int = MUTUAL_PR_MAX_PAIRS,
+                         exclude_keys: set[frozenset] | None = None,
+                         max_per_channel: int | None = MUTUAL_PR_MAX_PAIRS_PER_CHANNEL
+                         ) -> list[dict]:
     """Every unordered pair of `channels` that scores `min_score` or higher
     (mutual_pr_pair_score), returned best-first. `max_pairs` is only a hard
     ceiling for a pathologically large folder, not a target count.
 
-    Each `channels` item must carry: `followers` (int), `forecast` (the
-    ad_forecast dict, for its `"24h"` key), `best_days` (a top-N best_days()
-    output — drives the day-overlap score component and each side's
-    headline days), `best_days_full` (a best_days(..., top_n=7) output —
-    drives `mutual_days`; falls back to `best_days` if absent), `folder_id`
-    (str or None), and `tag` (str or None — a shared tag is the main niche
-    signal, see niche_affinity). Anything else on the item (label, link, …)
-    is left untouched and comes back on the result's `a` / `b`.
+    Each `channels` item must carry: `key` (str — identifies it for
+    `exclude_keys`/`max_per_channel`; anything hashable works, even if two
+    items happen to share one, since it's only ever compared, never used to
+    look anything up here), `followers` (int), `forecast` (the ad_forecast
+    dict, for its `"24h"` key), `best_days` (a top-N best_days() output —
+    drives the day-overlap score component and each side's headline days),
+    `best_days_full` (a best_days(..., top_n=7) output — drives
+    `mutual_days`; falls back to `best_days` if absent), `folder_id` (str or
+    None), and `tag` (str or None — a shared tag is the main niche signal,
+    see niche_affinity). Anything else on the item (label, link, …) is left
+    untouched and comes back on the result's `a` / `b`.
+
+    `exclude_keys` — an optional set of `frozenset({key_a, key_b})` pairs to
+    drop before scoring even runs, e.g. two channels a real posted link
+    already connects (see app.ui.mutual_pr_view, which builds this from
+    app.cross_mentions) don't need brokering — this table is for pairs that
+    *aren't* already working together.
+
+    `max_per_channel` — once ranked, keep at most this many of any one
+    channel's own best pairs (see _cap_pairs_per_channel); None disables the
+    cap entirely (every scoring pair up to `max_pairs` survives).
 
     Each result item: `{"a", "b", "score", "size_parity", "quality_parity",
     "day_overlap", "niche", "days_a", "days_b", "mutual_days"}` —
@@ -683,6 +770,8 @@ def rank_mutual_pr_pairs(channels: list[dict],
     for i in range(len(channels)):
         for j in range(i + 1, len(channels)):
             a, b = channels[i], channels[j]
+            if exclude_keys and frozenset((a.get("key"), b.get("key"))) in exclude_keys:
+                continue
             fid_a, fid_b = a.get("folder_id"), b.get("folder_id")
             tag_a, tag_b = a.get("tag"), b.get("tag")
             comp = mutual_pr_pair_score(
@@ -703,4 +792,6 @@ def rank_mutual_pr_pairs(channels: list[dict],
             ranked.append({"a": a, "b": b, "days_a": days_a, "days_b": days_b,
                            "mutual_days": mutual, **comp})
     ranked.sort(key=lambda p: p["score"], reverse=True)
+    if max_per_channel:
+        ranked = _cap_pairs_per_channel(ranked, max_per_channel)
     return ranked[:max_pairs]

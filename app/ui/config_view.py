@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ..activity import channel_activity_trend
 from ..config import CONN_FIELDS, config_dir
 from ..errors import friendly_os_error
 from ..folders import FolderStore
@@ -1007,7 +1008,9 @@ class ConfigView(QWidget):
         within each group. Rating/Views/Viral share (see
         folders_export_extra_chk) reuse app.rating.score_entries so they
         come out numerically identical to what Folder Stats itself would
-        show for the same folder/period — see _collect_export_metrics."""
+        show for the same folder/period — see _collect_export_metrics
+        (which also folds each channel's year-over-year activity trend into
+        its Rating, so a winding-down channel ranks lower)."""
         summaries = self.folder_store.sorted_by_folder(self.channel_store.list())
         folder_name = {f["id"]: f["name"] for f in self.folder_store.list_folders()}
         extra = self.folders_export_extra_chk.isChecked()
@@ -1022,6 +1025,7 @@ class ConfigView(QWidget):
                  "| " + " | ".join(["---"] * len(headers)) + " |"]
 
         metrics_by_key: dict[str, tuple] = {}
+        mode = "all"
         if extra:
             mode, target_key = self.folders_export_period_combo.currentData() or ("all", None)
             metrics_by_key = self._collect_export_metrics(summaries, mode, target_key)
@@ -1041,12 +1045,20 @@ class ConfigView(QWidget):
                 title = (ch.get("title") or ch["key"]).replace("|", "")
                 ident = f"{title[:18]}({ch['key']})"
             tag = self.tag_store.tag_for_channel(ch["key"]) or ""
-            # Cached value only (see ChannelStore.list()'s own
-            # "fairness_pct") — never recomputed here; blank, not "—",
-            # when it's never been calculated at all, so it visibly
-            # differs from the "extra" columns' "not enabled" placeholder.
+            # Cached values only (see ChannelStore.list()) — never
+            # recomputed here. Three distinct states: a "%" score,
+            # "—" for a channel that WAS calculated but has no fair/fake
+            # links to score, and blank for one never calculated at all
+            # (which also differs from the "extra" columns' "not enabled"
+            # placeholder).
             fairness_pct = ch.get("fairness_pct")
-            ethics = f"{fairness_pct}%" if fairness_pct is not None else ""
+            if fairness_pct is not None:
+                ethics = f"{fairness_pct}%"
+            elif ch.get("mentions_calculated"):
+                ethics = "—"
+            else:
+                ethics = ""
+
             row = [folder, fmt_int(ch.get("members", 0)), ident, tag, ethics]
             if extra:
                 metrics = metrics_by_key.get(ch["key"])
@@ -1057,6 +1069,12 @@ class ConfigView(QWidget):
                     row += [f"{score:.3f}", fmt_int(views), f"{viral_share:.1f}%",
                             str(round(quality))]
             lines.append("| " + " | ".join(row) + " |")
+        if extra:
+            # Rating always carries the activity-trend penalty; the "Ethics
+            # is whole-history" caveat only bites when a real period is set.
+            lines += ["", self.tr_("folder_export_rating_trend_note")]
+            if mode != "all":
+                lines.append(self.tr_("folder_export_alltime_note"))
         return "\n".join(lines) + "\n"
 
     def _collect_export_metrics(self, summaries: list[dict], mode: str,
@@ -1068,7 +1086,14 @@ class ConfigView(QWidget):
         app.rating.score_entries — that's what makes a channel's Rating
         here match what Folder Stats itself would show, unlike a
         channel-global metric which couldn't reproduce that per-folder
-        normalization at all."""
+        normalization at all.
+
+        One deliberate difference from Folder Stats: each entry also carries
+        its `activity_trend` (app.activity.channel_activity_trend, computed
+        over the channel's whole monthly history regardless of `mode`), so
+        score_entries can dock the Rating of a channel that's slowing /
+        stalling / abandoned — an export meant to be read at a glance
+        shouldn't rank a winding-down channel like a live one."""
         groups: dict[str | None, list[str]] = {}
         for ch in summaries:
             fid = self.folder_store.folder_for_channel(ch["key"])
@@ -1082,7 +1107,9 @@ class ConfigView(QWidget):
                 totals = self._channel_bucket_totals(data, mode, target_key)
                 if totals is None:
                     continue
-                entries.append({"key": key, **totals})
+                trend = channel_activity_trend(
+                    (data.get("distributions") or {}).get("monthly"))
+                entries.append({"key": key, "activity_trend": trend, **totals})
             if not entries:
                 continue
             score_entries(entries)

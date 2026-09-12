@@ -18,35 +18,52 @@ conversion rate) — see that module's docstring. mutual_pr_hint surfaces the
 same caveat in the UI itself, since this table is meant to inform deals with
 other people's channels, not just describe your own.
 
-Below the main table sit two more cards: **MPR Pairs** — the top channel
+Above the main table sits a **Channel links** card: which tracked channels
+already link to which others, and how often — app.cross_mentions' whole-base
+scan of every channel's own stored `all_links` (any t.me link a post's
+caption carries, not just Telegram's own "public forward" stat), matched
+against ChannelStore's own roster of tracked channels rather than
+mentions.md's roster of people. Cached (app.cross_mentions.
+cache_cross_mentions) so the table paints instantly from whatever was last
+calculated; a Calculate/Recalculate button reruns it — cheap enough (pure
+link matching, no NER, no Telegram calls) to run synchronously on click
+rather than through a background worker. Who already promotes a channel is
+exactly the signal a Mutual PR decision should see first, hence its
+position above the forecast table.
+
+Below the main table sits one more card: **MPR Pairs** — the top channel
 pairs ranked by app.scoring_pr.rank_mutual_pr_pairs (size/engagement/timing/
 niche compatibility; the math lives there, not here — niche is tag-first,
 with a shared folder counting for much less, so cross-folder same-tag pairs
 surface), whose "best days" column shows each side's own best days plus a ★
-for the days that suit both at once (mutual_best_days) — and, at the bottom,
-the cross-channel
-**reposts** table (moved here from app.ui.folder_stat_view — who already
-reposts whom is exactly the pairs you don't need to broker a swap for).
-Both are scoped to whatever the folder filter is showing.
+for the days that suit both at once (mutual_best_days). Both this and
+Channel links are scoped to whatever the folder filter is showing.
 
 The Markdown export (_build_md) keeps the main forecast table byte-for-byte
-and *appends* just the MPR Pairs table ("## Пары ВП") — no reposts table,
-no blurb.
+and *appends* just the MPR Pairs table ("## Пары ВП") — no Channel links
+table, no blurb.
 """
 from __future__ import annotations
 
-import re
+from datetime import datetime
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
-    QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
+    QAbstractItemView, QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
+    QHeaderView, QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ..activity import channel_activity_trend
+from ..cross_mentions import (
+    cache_cross_mentions, compute_cross_channel_mentions, load_cross_mentions_cache,
+    rank_targets,
+)
 from ..errors import friendly_os_error
 from ..folders import FolderStore
+from ..mentions import MentionsStore
+from ..rating import activity_trend_penalty
 from ..scoring_pr import (
     ad_forecast, ad_forecast_range, best_days, channel_interest,
     rank_mutual_pr_pairs, repeated_post_forecast,
@@ -56,50 +73,11 @@ from .dashboard_view import fmt_int, short_num
 from .theme import COLORS
 from .widgets import SectionCard, hline, open_external_link
 
-# t.me/name or t.me/c/123 -> the "name"/"123" ident, lowercased — used to
-# match a public-repost link back to a tracked channel (moved here from
-# folder_stat_view along with the cross-channel reposts table).
-_TME_IDENT_RE = re.compile(r"t\.me/(?:c/)?([^/?#\s]+)")
-
-
-def _extract_ident(link: str) -> str:
-    m = _TME_IDENT_RE.search(str(link or ""))
-    return m.group(1).lower() if m else ""
-
-
-def _collect_repost_links(channels: list[dict]) -> list[dict]:
-    """Cross-channel reposts *within* `channels`, from each checkpoint's
-    stored top-N `rows` public-forward data — only as complete as the
-    top-N and "include public reposts" choices made when each channel was
-    fetched. Returns edge dicts sorted by repost count, descending."""
-    index: dict[str, dict] = {}
-    for ch in channels:
-        uname = (ch.get("username") or "").lower()
-        cid = str(ch.get("info", {}).get("id") or "")
-        if uname:
-            index[uname] = ch
-        if cid:
-            index[cid] = ch
-
-    edges: dict[tuple, dict] = {}
-    for ch in channels:
-        for row in ch.get("rows", []) or []:
-            pub = row.get("public")
-            if not pub or pub.get("count", 0) <= 0:
-                continue
-            for item in pub.get("items", []) or []:
-                link = item.get("link", "")
-                target = index.get(_extract_ident(link))
-                if not target or target.get("key") == ch.get("key"):
-                    continue
-                key = (ch["key"], target["key"])
-                edge = edges.setdefault(key, {
-                    "source": _channel_label(ch), "target": _channel_label(target),
-                    "count": 0, "views": 0, "example": link,
-                })
-                edge["count"] += 1
-                edge["views"] += int(item.get("views", 0) or 0)
-    return sorted(edges.values(), key=lambda e: e["count"], reverse=True)
+# Channel links table columns (see _links_card/_rebuild_links_table).
+_LINKS_COL_CHANNEL = 0
+_LINKS_COL_BY = 1
+_LINKS_COL_COUNT = 2
+_LINKS_COL_TOP = 3
 
 # Forecast columns between 24h and Best Days, in table order.
 _FORECAST_COLS = ["48h", "72h", "week", "month"]
@@ -156,8 +134,11 @@ class MutualPrView(QWidget):
         self.tag_store = tag_store
         self._entries: list[dict] = []
         self._rendered_entries: list[dict] = []
+        self._channel_by_key: dict[str, dict] = {}   # see _reload_entries
         self._sort_col = _TINTED_COL   # 24h forecast — see _render_table
         self._sort_desc = True
+        self._links_sort_col = _LINKS_COL_COUNT
+        self._links_sort_desc = True
         self._build_ui()
 
     def tr_(self, key: str, **kw) -> str:
@@ -223,9 +204,9 @@ class MutualPrView(QWidget):
         self.empty_lbl.setWordWrap(True)
         page.addWidget(self.empty_lbl)
 
+        page.addWidget(self._links_card())
         page.addWidget(self._table_card(), 100)
         page.addWidget(self._pairs_card())
-        page.addWidget(self._links_card())
         page.addStretch(1)
 
         self.page_scroll.setWidget(page_holder)
@@ -269,10 +250,11 @@ class MutualPrView(QWidget):
             self.tr_("col_repeated_after_month")])
 
     def _links_card(self) -> SectionCard:
-        """Cross-channel reposts between the channels currently shown — moved
-        here from the Folder Stats view so all ad-swap signals live on one
-        screen (who already reposts whom is exactly the pairs you don't need
-        to broker a swap for)."""
+        """Which tracked channels already link to which others — see the
+        module docstring and app.cross_mentions. A Calculate/Recalculate
+        button (_on_calculate_links_clicked) runs the whole-base scan;
+        _rebuild_links_table paints from whatever's cached without
+        recomputing anything, so opening this view is instant."""
         card = SectionCard(self.tr_("mutual_pr_links_title"))
         self.links_card_ref = card
 
@@ -281,29 +263,38 @@ class MutualPrView(QWidget):
         self.links_hint_lbl.setWordWrap(True)
         card.body.addWidget(self.links_hint_lbl)
 
+        calc_row = QHBoxLayout()
+        self.links_calc_btn = QPushButton(self.tr_("mutual_pr_links_calc_btn"))
+        self.links_calc_btn.clicked.connect(self._on_calculate_links_clicked)
+        calc_row.addWidget(self.links_calc_btn, 0)
+        self.links_calculated_lbl = QLabel("")
+        self.links_calculated_lbl.setObjectName("hint")
+        calc_row.addWidget(self.links_calculated_lbl, 1)
+        card.body.addLayout(calc_row)
+
         self.links_empty_lbl = QLabel(self.tr_("mutual_pr_links_empty"))
         self.links_empty_lbl.setObjectName("hint")
         card.body.addWidget(self.links_empty_lbl)
 
-        self.links_table = QTableWidget(0, 5)
+        self.links_table = QTableWidget(0, 4)
         self._set_links_headers()
         self.links_table.verticalHeader().setVisible(False)
         self.links_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.links_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.links_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch)
-        self.links_table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Stretch)
-        self.links_table.cellDoubleClicked.connect(self._open_link_example)
-        self.links_table.setMaximumHeight(240)
+        links_header = self.links_table.horizontalHeader()
+        links_header.setSectionResizeMode(_LINKS_COL_CHANNEL, QHeaderView.ResizeMode.Stretch)
+        links_header.setSectionResizeMode(_LINKS_COL_TOP, QHeaderView.ResizeMode.Stretch)
+        links_header.setSectionsClickable(True)
+        links_header.sectionClicked.connect(self._on_links_header_clicked)
+        self.links_table.cellDoubleClicked.connect(self._open_links_cell)
+        self.links_table.setMaximumHeight(280)
         card.body.addWidget(self.links_table)
         return card
 
     def _set_links_headers(self) -> None:
         self.links_table.setHorizontalHeaderLabels([
-            self.tr_("col_link_source"), self.tr_("col_link_target"),
-            self.tr_("col_link_reposts"), self.tr_("col_views"),
-            self.tr_("col_link_example")])
+            self.tr_("mutual_pr_links_col_channel"), self.tr_("mutual_pr_links_col_by"),
+            self.tr_("mutual_pr_links_col_count"), self.tr_("mutual_pr_links_col_top_source")])
 
     def _pairs_card(self) -> SectionCard:
         """Top channel *pairs* ranked for an ad swap — see
@@ -369,11 +360,13 @@ class MutualPrView(QWidget):
         """Compute once per channel — header-click sorting only re-sorts
         this cached list, never recomputes it (see _render_table)."""
         self._entries = []
+        self._channel_by_key = {}
         for summary in self.channel_store.list():
             data = self.channel_store.load(summary["key"])
             if not data:
                 continue
             data.setdefault("key", summary["key"])
+            self._channel_by_key[data["key"]] = data
             stats = data.get("stats", {}) or {}
             avg_views = float(stats.get("avg_views", 0) or 0)
             avg_views_settled = float(stats.get("avg_views_settled", 0) or 0)
@@ -384,8 +377,14 @@ class MutualPrView(QWidget):
             weekday_counts = data.get("distributions", {}).get("weekday") or [0] * 7
             rows = data.get("rows", []) or []
             interest = channel_interest(rows, avg_views)
+            # A channel that's slowing/stalling/abandoned (see
+            # app.activity.channel_activity_trend) still forecasts off its
+            # old avg_views_settled otherwise — exactly what put a winding-
+            # down channel at the top of this table's default 24h sort.
+            trend = channel_activity_trend((data.get("distributions") or {}).get("monthly"))
             forecast = ad_forecast(avg_views_settled, interest, avg_posts_per_day,
-                                   total_posts, followers, viral_post_share, rows)
+                                   total_posts, followers, viral_post_share, rows,
+                                   activity_trend=trend)
             tag = (self.tag_store.tag_for_channel(data["key"])
                    if self.tag_store is not None else None)
             self._entries.append({
@@ -393,6 +392,7 @@ class MutualPrView(QWidget):
                 "folder_id": self.folder_store.folder_for_channel(data["key"]),
                 "tag": tag,
                 "followers": followers,
+                "activity_trend": trend,
                 "forecast": forecast,
                 "forecast_range": ad_forecast_range(forecast),
                 "repeated": repeated_post_forecast(forecast["24h"], avg_posts_per_day),
@@ -470,8 +470,20 @@ class MutualPrView(QWidget):
         for i, entry in enumerate(entries):
             ch = entry["channel"]
             label = _channel_label(ch)
-            title_item = QTableWidgetItem(_truncate(label))
-            title_item.setToolTip(label)
+            trend = entry.get("activity_trend")
+            # Why the forecast below might read lower than the channel's
+            # raw reach would suggest — see ad_forecast's own
+            # `activity_trend` argument.
+            if trend and trend.get("verdict") != "active":
+                pct = round(activity_trend_penalty(trend) * 100)
+                title = f"{_truncate(label)} ⚠"
+                tooltip = (label + "\n" + self.tr_(
+                    "mutual_pr_activity_tooltip",
+                    verdict=self.tr_(f"activity_verdict_{trend['verdict']}"), pct=pct))
+            else:
+                title, tooltip = _truncate(label), label
+            title_item = QTableWidgetItem(title)
+            title_item.setToolTip(tooltip)
             self.table.setItem(i, _TITLE_COL, title_item)
             self.table.setItem(i, _FOLLOWERS_COL, QTableWidgetItem(fmt_int(entry["followers"])))
 
@@ -499,33 +511,137 @@ class MutualPrView(QWidget):
         self._rebuild_pairs_table()
 
     # -------------------------------------------------------------- links
-    def _rebuild_links_table(self) -> None:
-        edges = _collect_repost_links(self._visible_channels())
-        self.links_empty_lbl.setVisible(not edges)
-        self.links_table.setVisible(bool(edges))
-        self.links_table.setRowCount(len(edges))
-        for i, edge in enumerate(edges):
-            self.links_table.setItem(i, 0, QTableWidgetItem(edge["source"]))
-            self.links_table.setItem(i, 1, QTableWidgetItem(edge["target"]))
-            self.links_table.setItem(i, 2, QTableWidgetItem(fmt_int(edge["count"])))
-            self.links_table.setItem(i, 3, QTableWidgetItem(fmt_int(edge["views"])))
-            example = QTableWidgetItem(self.tr_("show"))
-            example.setToolTip(edge["example"])
-            example.setData(Qt.ItemDataRole.UserRole, edge["example"])
-            self.links_table.setItem(i, 4, example)
-
     def _visible_channels(self) -> list[dict]:
         return [e["channel"] for e in self._visible_entries()]
 
-    def _open_link_example(self, row: int, _col: int) -> None:
-        item = self.links_table.item(row, 4)
+    @staticmethod
+    def _parse_iso(value: str) -> datetime | None:
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+        except (TypeError, ValueError):
+            return None
+
+    def _channel_label_for_key(self, key: str) -> str:
+        ch = self._channel_by_key.get(key)
+        return _channel_label(ch) if ch else key
+
+    def _links_sort_value(self, target: dict, col: int):
+        if col == _LINKS_COL_CHANNEL:
+            return self._channel_label_for_key(target["key"]).lower()
+        if col == _LINKS_COL_BY:
+            return len(target["sources"])
+        if col == _LINKS_COL_TOP:
+            src = target["sources"][0] if target["sources"] else None
+            return self._channel_label_for_key(src["key"]).lower() if src else ""
+        return target["count"]   # _LINKS_COL_COUNT, and the default
+
+    def _on_links_header_clicked(self, col: int) -> None:
+        if col == self._links_sort_col:
+            self._links_sort_desc = not self._links_sort_desc
+        else:
+            self._links_sort_col, self._links_sort_desc = col, True
+        self._rebuild_links_table()
+
+    def _on_calculate_links_clicked(self) -> None:
+        """Runs app.cross_mentions.compute_cross_channel_mentions for the
+        *whole* tracked base right now, synchronously — pure link matching
+        over already-fetched data, no NER, no Telegram calls, fast enough
+        (well under a second on this app's own ~200-channel test set) that
+        a background ToolWorker would only add latency, not save any.
+        Caches the result (app.cross_mentions.cache_cross_mentions) so the
+        next time this view opens, the table paints from that instead of
+        rescanning the base again."""
+        self.links_calc_btn.setEnabled(False)
+        self.links_calc_btn.setText(self.tr_("mutual_pr_links_calculating"))
+        QApplication.processEvents()
+        try:
+            edges = compute_cross_channel_mentions(self.channel_store, MentionsStore())
+            cache_cross_mentions(edges)
+        finally:
+            self.links_calc_btn.setEnabled(True)
+        self._rebuild_links_table()
+
+    def _rebuild_links_table(self) -> None:
+        """Paints from whatever app.cross_mentions.load_cross_mentions_cache
+        returns — never recomputes (see _on_calculate_links_clicked for the
+        only thing that does). Target channels are ranked by
+        app.cross_mentions.rank_targets ("which channel is mentioned more"
+        is a property of the target, summed across every source), then
+        filtered to the folder currently selected above and re-sorted by
+        whichever column was last clicked."""
+        cache = load_cross_mentions_cache()
+        has_cache = cache is not None
+        self.links_calc_btn.setText(self.tr_(
+            "mutual_pr_links_recalc_btn" if has_cache else "mutual_pr_links_calc_btn"))
+        if has_cache:
+            dt = self._parse_iso(cache.get("calculated_at", ""))
+            when = f"{dt:%Y-%m-%d %H:%M}" if dt else (cache.get("calculated_at") or "")
+            self.links_calculated_lbl.setText(
+                self.tr_("mutual_pr_links_calculated_at", when=when))
+        else:
+            self.links_calculated_lbl.setText("")
+
+        targets = rank_targets(cache["edges"]) if has_cache and cache.get("edges") else []
+        if self.folder_combo.currentData() is not None:
+            visible_keys = {ch["key"] for ch in self._visible_channels()}
+            targets = [t for t in targets if t["key"] in visible_keys]
+        targets = sorted(targets, key=lambda t: self._links_sort_value(t, self._links_sort_col),
+                         reverse=self._links_sort_desc)
+
+        self.links_empty_lbl.setVisible(not targets)
+        self.links_table.setVisible(bool(targets))
+        self.links_table.setRowCount(len(targets))
+        for i, target in enumerate(targets):
+            ch = self._channel_by_key.get(target["key"])
+            chan_item = QTableWidgetItem(self._channel_label_for_key(target["key"]))
+            if ch and ch.get("link"):
+                chan_item.setData(Qt.ItemDataRole.UserRole, ch["link"])
+                chan_item.setToolTip(ch["link"])
+            self.links_table.setItem(i, _LINKS_COL_CHANNEL, chan_item)
+            self.links_table.setItem(i, _LINKS_COL_BY, QTableWidgetItem(str(len(target["sources"]))))
+            self.links_table.setItem(i, _LINKS_COL_COUNT, QTableWidgetItem(fmt_int(target["count"])))
+
+            sources = target["sources"]
+            top = sources[0] if sources else None
+            top_ch = self._channel_by_key.get(top["key"]) if top else None
+            top_item = QTableWidgetItem(
+                f"{self._channel_label_for_key(top['key'])} ({top['count']})" if top else "—")
+            if len(sources) > 1:
+                others = ", ".join(f"{self._channel_label_for_key(s['key'])} ({s['count']})"
+                                   for s in sources[1:6])
+                top_item.setToolTip(self.tr_("mutual_pr_links_also", names=others))
+            elif top_ch and top_ch.get("link"):
+                top_item.setToolTip(top_ch["link"])
+            if top_ch and top_ch.get("link"):
+                top_item.setData(Qt.ItemDataRole.UserRole, top_ch["link"])
+            self.links_table.setItem(i, _LINKS_COL_TOP, top_item)
+
+        order = Qt.SortOrder.DescendingOrder if self._links_sort_desc else Qt.SortOrder.AscendingOrder
+        self.links_table.horizontalHeader().setSortIndicatorShown(True)
+        self.links_table.horizontalHeader().setSortIndicator(self._links_sort_col, order)
+
+    def _open_links_cell(self, row: int, col: int) -> None:
+        if col not in (_LINKS_COL_CHANNEL, _LINKS_COL_TOP):
+            return
+        item = self.links_table.item(row, col)
         link = item.data(Qt.ItemDataRole.UserRole) if item else None
         if link:
             open_external_link(link)
 
     # -------------------------------------------------------------- pairs
+    def _linked_pair_keys(self) -> set[frozenset]:
+        """Every channel-pair the Channel links card's cache already
+        connects (either direction — see app.cross_mentions), as
+        {frozenset({key_a, key_b}), ...}: a pair a real posted link already
+        connects doesn't need MPR Pairs to suggest it. Empty (no
+        exclusions) until Channel links has actually been calculated once."""
+        cache = load_cross_mentions_cache()
+        edges = cache.get("edges") if cache else None
+        return {frozenset((e["source"], e["target"])) for e in edges or []}
+
     def _ranked_pairs(self) -> list[dict]:
-        return rank_mutual_pr_pairs(self._pair_channels())
+        return rank_mutual_pr_pairs(self._pair_channels(),
+                                    exclude_keys=self._linked_pair_keys())
 
     def _wd_list(self, days: list[int]) -> str:
         return ", ".join(self.tr_(_WD_KEYS[d]) for d in days) or "—"

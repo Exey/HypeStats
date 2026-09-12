@@ -130,12 +130,33 @@ def _followers_cap(members: int) -> int | None:
     return None
 
 
-# Also gated on Top 50+ (see _channel_limited_entries): a post this weak on
-# *both* fronts at once doesn't belong in a big ranked slate — but either
-# one alone is enough to keep it (a high-view post with 0 shares is still
-# fine, and vice versa).
+# Also gated on Top 50+ (see _channel_limited_entries): at Top 50-200, a
+# post this weak on *both* fronts at once doesn't belong in a big ranked
+# slate, but either one alone is enough to keep it (a high-view post with 0
+# shares is still fine, and vice versa). Top 250 gets its own pair *and* its
+# own, stricter rule (see _quality_floor): both floors must hold, not just
+# one — that much bigger a slate pulls in a much longer tail, and a real
+# share count is what actually proves a post wasn't just a view-count
+# fluke, so a view count alone no longer excuses a weak share count there.
 _TOP50_MIN_VIEWS = 4000
 _TOP50_MIN_SHARES = 11
+_TOP250_MIN_VIEWS = 3000
+_TOP250_MIN_SHARES = 30
+
+
+def _quality_floor(max_posts: int) -> tuple[int, int, bool] | None:
+    """(min_views, min_shares, require_both) for the selected Top-N tier,
+    biggest matching tier first — None below Top 50, where natural
+    competition for slots already keeps a weak post from surfacing at all.
+    `require_both` tells _channel_limited_entries how to judge a post
+    against the pair: False (Top 50-200) drops it only if it's under *both*
+    floors at once; True (Top 250) drops it if it's under *either* one —
+    see the constants above."""
+    if max_posts >= 250:
+        return _TOP250_MIN_VIEWS, _TOP250_MIN_SHARES, True
+    if max_posts >= 50:
+        return _TOP50_MIN_VIEWS, _TOP50_MIN_SHARES, False
+    return None
 
 # One large channel (uncapped by _followers_cap) can still run away with a
 # big Top-N — e.g. 43 of its posts vs ~3 for the typical channel. When the
@@ -692,7 +713,8 @@ class ContentQualityView(QWidget):
         a per-channel cap scaled by follower count (_followers_cap) — on
         top of, and whichever is stricter than, the Tg Links limit combo's
         own per-channel cap (0 = no cap); and dropping any post that's weak
-        on *both* views and shares at once (neither alone disqualifies it).
+        on *both* views and shares at once (neither alone disqualifies it),
+        against a floor that gets stricter at Top 250 (see _quality_floor).
         With the per-channel-limit combo set to "Rein in dominant channel"
         a third joins them: an anomaly cap on a single channel running away
         with the slate (_ANOMALY_FACTOR / _ANOMALY_CAP). Finally capped to at
@@ -713,6 +735,7 @@ class ContentQualityView(QWidget):
         # these extra rules only matter once there's enough room for them
         # to slip through.
         top50_rules = max_posts >= 50
+        quality_floor = _quality_floor(max_posts)
 
         def _fill(anomaly_caps: dict[str, int]) -> tuple[list[dict], dict[str, int]]:
             seen: dict[str, int] = {}
@@ -725,10 +748,13 @@ class ContentQualityView(QWidget):
                 members = _channel_members(entry["channel"])
                 if min_followers and members < min_followers:
                     continue
-                if top50_rules:
+                if quality_floor:
+                    min_views, min_shares, require_both = quality_floor
                     views = int(entry["row"].get("views", 0) or 0)
                     shares = int(entry["row"].get("forwards", 0) or 0)
-                    if views < _TOP50_MIN_VIEWS and shares < _TOP50_MIN_SHARES:
+                    below_views, below_shares = views < min_views, shares < min_shares
+                    fails = (below_views or below_shares) if require_both else (below_views and below_shares)
+                    if fails:
                         continue
                 key = _channel_ref(entry["channel"])
                 effective_limit = limit or None

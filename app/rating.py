@@ -7,8 +7,9 @@ import UI code from the other to reuse it.
 
 score_entries() takes one period bucket's entries — one dict per channel,
 with `views`, `shares`, `reactions`, `posts` (all period *totals* /
-counts), `quality` (see app.scoring) and `viral_share` already filled in —
-and adds a `score` key to each, in [0, 1]:
+counts), `quality` (see app.scoring) and `viral_share` already filled in
+(and, optionally, `activity_trend` — see the decline penalty below) — and
+adds a `score` key to each, in [0, 1]:
 
     views/post  = views ÷ posts (mean views *per post*), min-max normalized
                  against the other entries in the same bucket, weighted
@@ -100,6 +101,14 @@ by REPOST_SHARE_PENALTY_FULL (30%) and holding there — a channel coasting on
 reposts is doing less original work than its post volume suggests, and its
 rating should say so. Checkpoints fetched before per-post reposts were
 tracked report repost_share 0 and are unaffected until refetched.
+
+Finally, a channel that's winding down is cut by `activity_trend_penalty()`
+— a flat fraction (20% `slowing`, 33% `stalling`, 50% `abandoned`) off the
+composite, from the year-over-year verdict in app.activity.channel_activity_trend
+that the caller passes in as each entry's `activity_trend`. Applied after
+the reach bonus so a former heavyweight feels it too; an entry with no
+`activity_trend` (caller didn't supply one, or too little history to judge)
+is untouched.
 """
 from __future__ import annotations
 
@@ -146,6 +155,24 @@ ZERO_REPOSTS_PENALTY = 0.4  # rating cut for a channel with ~0 reposts — see m
 REPOST_SHARE_PENALTY_START = 20.0
 REPOST_SHARE_PENALTY_FULL = 30.0
 REPOST_SHARE_PENALTY_MAX = 0.30
+
+# Demerit for a channel that's winding down — the year-over-year verdict from
+# app.activity.channel_activity_trend, passed in on each entry as
+# `activity_trend`. An all-time Rating otherwise keeps a channel near the top
+# of its folder on the strength of the year it was busy; this cuts the
+# composite score by a flat fraction per verdict. `active`, or too little
+# history to judge (`activity_trend` absent / None), costs nothing.
+ACTIVITY_TREND_PENALTY = {"slowing": 0.20, "stalling": 0.33, "abandoned": 0.50}
+
+
+def activity_trend_penalty(trend: dict | None) -> float:
+    """Fraction (0-0.50) to cut from the composite score for a declining
+    channel — see ACTIVITY_TREND_PENALTY and app.activity.channel_activity_trend.
+    `trend` is that function's return dict (or None); only its `verdict`
+    matters here."""
+    if not trend:
+        return 0.0
+    return ACTIVITY_TREND_PENALTY.get(trend.get("verdict"), 0.0)
 
 
 def repost_share_penalty(repost_share: float) -> float:
@@ -273,5 +300,9 @@ def score_entries(entries: list[dict]) -> None:
         # everyone under REACH_BONUS_START× the median untouched.
         ratio = e["views"] / median_views if median_views else 0.0
         e["score"] = min(1.0, e["score"] + reach_bonus(ratio))
+        # A channel winding down shouldn't ride an all-time Rating near the
+        # top — applied after the reach bonus so even a former titan feels
+        # it (see activity_trend_penalty).
+        e["score"] *= 1.0 - activity_trend_penalty(e.get("activity_trend"))
         # Last: too few posts in the period → the sample is noise.
         e["score"] *= _confidence(e.get("posts", 0))

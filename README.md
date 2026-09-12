@@ -211,7 +211,9 @@ The **Folders** and **Tags** cards sit at the top:
   "assign every channel to a folder" bulk action here. The sidebar can group
   and sort by folder. Also here: a **Markdown export** (one row per channel,
   optionally with per-period Rating / Views / Viral share, plus an **Ethics**
-  column), with a **Calculate Ethics** checkbox (folder selector + an **Only
+  column; the Rating carries a [year-over-year activity-decline
+  penalty](#activity-trend-abandonment)), with a **Calculate Ethics**
+  checkbox (folder selector + an **Only
   with Tags** filter) that scores any not-yet-cached channel in scope first —
   see [Mentions fairness (Ethics)](#mentions-fairness-ethics).
 - **Tags** — a lightweight one-tag-per-channel taxonomy loaded from a
@@ -228,8 +230,10 @@ Below that, for one folder and one period (monthly / seasonal / half-year /
 rolling-year window): **periodic stats** — per-channel views / shares /
 reactions / viral-share, the period's most-viewed post, **Post Quality**,
 and a composite **Rating** (see [rating.py](#composite-channel-rating)),
-exportable as Markdown. (The cross-channel reposts table that used to live
-here now sits at the bottom of the Mutual PR view.)
+exportable as Markdown. (The cross-channel table that used to live here
+moved to the Mutual PR view's own Channel links card, and moved again from
+reposts to a richer link-based signal — see
+[Cross-channel mentions](#cross-channel-mentions).)
 
 ### High-Quality Posts view (`🎯`)
 
@@ -237,8 +241,16 @@ For one folder and period, a grid of individual **posts** (not channels)
 ranked by content quality — proportional engagement relative to that post's
 own reach, not raw view count (see
 [scoring.py](#per-post-content-quality)). Filters for minimum
-followers, hiding text-only posts, and per-channel caps. On a Top 50+ slate
-a follower-scaled per-channel cap balances the list; the per-channel-limit
+followers, hiding text-only posts, and per-channel caps. On a Top 50-200
+slate a follower-scaled per-channel cap balances the list, and any post
+with *both* fewer than 4,000 views *and* fewer than 11 shares is dropped
+(either alone is still enough to keep it). At Top 250 specifically, the
+rule flips stricter: a post needs **both** 3,000+ views **and** 30+ shares
+to survive at all — that much bigger a slate pulls in a much longer tail,
+and a real share count is what actually proves a post wasn't just a
+view-count fluke, so a high view count alone no longer excuses a weak
+share count there (`_quality_floor` in `app/ui/content_quality_view.py`).
+The per-channel-limit
 dropdown's **"Rein in dominant channel"** option (between *No limit* and
 *7 per channel*) instead applies an anomaly cap — no fixed limit, but any
 single channel holding more than ~11 slots and 3× the typical channel's
@@ -251,6 +263,16 @@ summary.
 
 ### Mutual PR (ad-swap) view (`🤝`)
 
+Above the main table sits a **Channel links** card: which tracked channels
+already link to which *other tracked channels*, and how often — see
+[Cross-channel mentions](#cross-channel-mentions). A
+**Calculate**/**Recalculate** button (re)scans the whole tracked base;
+cached, so opening the view just paints the last result. Sorted by
+**Mentions** by default (click a header to re-sort) — which channel is
+mentioned more sits right at the top, since who already promotes a channel
+is exactly the signal a swap decision should see first. Double-click a
+**Channel** or **Top source** cell to open that channel in Telegram.
+
 Every tracked channel in one sortable table: followers, an estimated
 **ad-post follower-gain forecast** at five horizons (24h / 48h / 72h / week /
 month), a "repeated after a month" estimate for a reminder post, and the
@@ -260,14 +282,15 @@ posts with. All figures beyond Followers are heuristic estimates — see
 [scoring_pr.py](#mutual-pr-ad-swap-forecast) — and the view
 says so in the UI.
 
-Below the table sit two more cards: **MPR Pairs** — channel pairs ranked for
-an ad swap by size / engagement / timing / niche compatibility, with a
+Below the table sits one more card, **MPR Pairs** — channel pairs ranked for
+an ad swap by size / engagement / timing / niche compatibility, excluding
+any pair the Channel links card above already shows as connected and
+capped at 16 of any one channel's own best pairs (see
+[scoring_pr.py](#mutual-pr-partner-matching)), with a
 **Best posting days** column showing each side's best days plus `★` for the
-days that suit both at once (see
-[scoring_pr.py](#mutual-pr-partner-matching)) — and, at the bottom, the
-**cross-channel reposts** table (who already reposts whom — moved here from
-the Folders & Tags view). The **Markdown export** keeps the main forecast table intact
-and appends just the MPR Pairs table (`## Пары ВП`).
+days that suit both at once. The **Markdown export** keeps
+the main forecast table intact and appends just the MPR Pairs table
+(`## Пары ВП`) — neither Channel links nor its own export button feed it.
 
 ### Login, profiles, connection settings
 
@@ -408,6 +431,14 @@ by the time they hit 30%, and held there above that (`repost_share_penalty`,
 constants `REPOST_SHARE_PENALTY_START` / `_FULL` / `_MAX`). Coasting on other
 people's posts is less original work than the post count suggests.
 
+**Activity-decline penalty.** When the caller supplies an entry's
+`activity_trend` (the [year-over-year verdict](#activity-trend-abandonment)),
+`activity_trend_penalty` cuts the composite by a flat fraction —
+`ACTIVITY_TREND_PENALTY`: 20% `slowing`, 33% `stalling`, 50% `abandoned`,
+nothing for `active` or too-little-history — applied after the reach bonus.
+The Folders card's Markdown export passes it; Folder Stats (period-scoped
+buckets, where "abandoned now" doesn't belong on a 2024 quarter) does not.
+
 For each channel entry in a period bucket (`views`, `shares`, `reactions`,
 `posts`, `quality`, `viral_share`):
 
@@ -505,6 +536,15 @@ specifically so they can be retuned once real ad-swap outcomes are logged.
 - **`link_behavior_factor`** — ×(up to 1.05) for a channel that consistently
   single-mentions other channels (genuine cross-promotion), ×(down to 0.95)
   for one that consistently posts external-link spam.
+- **Activity-decline cut** — `avg_views_settled` is a lifetime average, so a
+  channel that's since gone quiet would otherwise still forecast off its
+  old reach and rank at the top of this table's default 24h sort. `ad_forecast`'s
+  own `activity_trend` argument (app.ui.mutual_pr_view supplies
+  [`channel_activity_trend`](#activity-trend-abandonment)'s verdict) cuts the
+  *whole* forecast by the same year-over-year penalty a channel's Rating
+  already takes — [`activity_trend_penalty`](#composite-channel-rating): 20%
+  `slowing`, 33% `stalling`, 50% `abandoned`. A discounted channel's title
+  gets a `⚠` marker and a tooltip explaining why.
 - **`ad_forecast_range`** — a crude ±band (low `×0.40`, high `×1.80`)
   combining the two dominant unverified constants; honestly labeled, not a
   fitted interval.
@@ -521,14 +561,17 @@ specifically so they can be retuned once real ad-swap outcomes are logged.
 `rank_mutual_pr_pairs` (bottom of `app/scoring_pr.py`) scores every *pair*
 of channels for how good an ad swap between them would be — the basis for
 the **MPR Pairs** card and the `## Пары ВП` section appended to the Mutual
-PR Markdown export. It uses only metrics the app already has (no mention
-graph, so it can't tell whether two channels have already promoted each
-other — filter those out upstream). The four components are a plain weighted
-sum in `[0, 1]`:
+PR Markdown export. The scoring itself uses only per-channel metrics; two
+channels that already promote each other are filtered out **upstream**, by
+the caller — see `exclude_keys` below, built by
+`app.ui.mutual_pr_view._linked_pair_keys` from the [Channel links
+card](#cross-channel-mentions)'s own cache, so a real posted link is what
+decides "already connected", not anything scored here. The four scoring
+components are a plain weighted sum in `[0, 1]`:
 
 | Component | Weight | Formula |
 | --- | --- | --- |
-| **`size_parity`** | 0.30 | `1 − abs(log10 subs_A − log10 subs_B) / log10(100)`, clamped to `[0, 1]` — 1.0 for equal size, 0 once one channel is 100× the other. Log-scaled, so a 2× gap scores the same at any absolute size. |
+| **`size_parity`** | 0.30 | `1 − abs(log10 subs_A − log10 subs_B) / log10(100)`, clamped to `[0, 1]` — 1.0 for equal size, 0 once one channel is 100× the other. Log-scaled, so a 2× gap scores the same at any absolute size — **except** two channels within `MUTUAL_PR_SIZE_WINDOW` (1,000) followers of each other always score a flat 1.0 regardless of ratio, since that log scale is otherwise unkind to small channels (300 vs 1,300 followers is a 4.3× ratio, same as 40k vs 172k, even though they're obviously the same tier). |
 | **`quality_parity`** | 0.30 | `1 − abs(f24_A − f24_B) / (f24_A + f24_B)` — how close the two 24h ad-post forecasts are (a proxy for "both convert ad views similarly"). |
 | **`day_overlap`** | 0.20 | shared entries in the two channels' top-2 `best_days` over `min(len_A, len_B)` — 1.0 when both top-2 sets match. |
 | **`niche_affinity`** | 0.20 | `1.0` if the two channels carry the **same tag** (a real niche match), `0.30` (`MUTUAL_PR_FOLDER_NICHE`) if they only share a **folder**, else `0`. Tag-first on purpose: a folder is just sidebar organization, so a different-folder same-tag pair beats a same-folder unrelated-tag one. |
@@ -536,7 +579,13 @@ sum in `[0, 1]`:
 The MPR Pairs table (UI card and Markdown export) lists **every pair scoring
 `MUTUAL_PR_MIN_SCORE` (0.51) or higher, best first, capped at
 `MUTUAL_PR_MAX_PAIRS` (500)** — the low floor just keeps the ranked tail
-available; the cap is what bounds the table.
+available; the cap is what bounds the table. Two more cuts, both by
+default: any pair `exclude_keys` names (dropped before scoring even runs)
+never appears at all, and once ranked, `max_per_channel`
+(`MUTUAL_PR_MAX_PAIRS_PER_CHANNEL`, 16) keeps only each channel's own
+best-scoring pairs, processed best-first (`_cap_pairs_per_channel`) so a
+generalist channel that scores well against nearly everyone can't crowd out
+pairs that don't involve it — either can be disabled by passing `None`.
 Its **Best posting days** column shows each channel's own best days (`A: … ·
 B: …`) and prefixes `★` for the days that are a good ad slot in *both*
 channels at once — `mutual_best_days`, which takes any weekday above each
@@ -544,6 +593,52 @@ channel's own average (not just a strict overlap of their top-2, which
 would miss a day ranked #3 for one side but still clearly above its
 average). All weights and constants are ordinary module-level values, meant
 to be retuned.
+
+### Cross-channel mentions
+
+`app/cross_mentions.py` backs the Mutual PR view's **Channel links** card:
+which *tracked* channels already link to which others, straight from real
+posted links. It matches against `ChannelStore`'s own roster of tracked
+channels — a different target than [Mentions fairness](#mentions-fairness-ethics),
+which matches against `mentions.md`'s roster of known *people* — so it
+answers Mutual PR's own question instead: who already promotes whom?
+
+That question used to be answered by a much thinner signal — the view's
+original cross-channel table counted only Telegram's own reported "public
+forward" stat, present solely for a channel fetched with "Include public
+reposts" turned on, which most channels never have. This instead scans
+every channel's own `all_links` (collected on every fetch/refresh
+regardless of that setting) for *any* t.me link a post's caption carries —
+a far larger, far more current sample already sitting on disk.
+
+- **Matching**: a link's target identity comes from
+  `app.mentions.tg_identity_key` — `@username` (case-folded, so
+  `t.me/Geekography` and `t.me/geekography` match) for a public link, or the
+  bare internal id straight out of a private `t.me/c/<id>` link, which is
+  also exactly `ChannelStore.list()`'s own `channel_id` — so a private link
+  matches a tracked channel exactly as reliably as a public one, no extra
+  resolution needed. `mentions.md` extends that one step further: a tracked
+  channel that's *also* filed as a `mentions.md` row (same id) has that
+  row's own "unclear links" registered as extra aliases for it too, so a
+  link still using an old handle, or an otherwise-unresolved private link a
+  row already accounts for, keeps matching after the live one's moved on.
+  Self-links (a channel linking to its own posts) are dropped — not a
+  cross-channel signal.
+- **Ranking**: `rank_targets` sums every matching edge onto its *target*
+  channel — **Mentions** (total link occurrences) and **Mentioned by** (how
+  many distinct channels do the linking), most-mentioned target first —
+  since "which channel is mentioned more" is a property of the target, not
+  any one source→target edge. Each row's **Top source** is whichever
+  channel mentions it most, with the rest available on hover.
+- **Speed & caching**: pure dict/string matching over already-fetched data —
+  no NER, no morphology, no Telegram calls — so a full base-wide rescan
+  (`compute_cross_channel_mentions`) runs in under a second even across
+  ~200 channels, fast enough to trigger synchronously from the Calculate
+  button rather than through a background worker. The result is cached to
+  one shared file (`cross_mentions.json`, not per-checkpoint — this is a
+  property of the whole tracked set, not any single channel) with a
+  `calculated_at` stamp, so opening the Mutual PR view paints instantly
+  from whatever was last calculated instead of rescanning the base.
 
 ### Mentions fairness (Ethics)
 
@@ -588,17 +683,66 @@ read/write it:
   (`_show_cached_stats`), then gets overwritten moments later once the real,
   period-scoped classification finishes — so a heavy channel doesn't show a
   blank Summary while it recomputes.
-- **Dashboard's Ethics card** — shows the cached `fairness_pct`, or a
-  **Calculate** button that runs it on demand if the channel has never been
-  scored.
+- **Dashboard's Ethics card** — shows the cached score (`—` for a channel
+  that was scored but has no fair/fake links), with a **Calculate** button
+  when it's never been scored and a **Recalculate** button once it has (the
+  only way to refresh one channel, since the batch job skips anything
+  already done).
 - **Folders & Tags → Folders card export** — an optional **Calculate
   Ethics** checkbox (with a folder selector and an **Only with Tags**
   filter) that runs `tools.mentions_export.run_fairness_calculate` before
   writing the Markdown, so its own **Ethics** column has something to show.
-  Lean by default: a channel that's already cached is skipped, not
-  recomputed, so re-running this before every export is cheap once a folder's
-  been through it once (`force=True` recalculates everyone regardless, not
-  currently wired to any button).
+  Lean by default: a channel that's already been calculated — keyed on the
+  cache's `calculated_at` stamp, so a legitimate `—` result still counts as
+  done — is skipped, not recomputed, so re-running this before every export
+  is cheap once a folder's been through it once (`force=True` recalculates
+  everyone regardless, not currently wired to any button). The log names
+  each channel as it starts and reports the result with its elapsed time.
+  In the exported table, the **Ethics** and **Trend** columns are always
+  whole-history; only Rating / Views / Viral share / Post Quality follow the
+  period picker, and a footnote says so whenever a non-"all" period is set.
+
+### Activity trend (abandonment)
+
+`app/activity.py`'s `channel_activity_trend` answers the one thing an
+all-time Rating / Views / Post Quality can't — **is this channel still
+going, or coasting on a strong past?** A small channel that was busy last
+year and has since gone quiet keeps a flattering lifetime score long after
+it stops being worth an ad swap.
+
+It reads the checkpoint's gap-filled monthly series
+(`distributions.monthly`), drops the still-filling current month, and
+compares the **last 12 complete months** against the **12 before them**
+(own-posts only, reposts excluded; a partial prior year is annualized so a
+~18-month-old channel is still judged fairly):
+
+| Signal | What it compares |
+| --- | --- |
+| **reach** | total views, recent year vs prior year — the headline: fewer posts *or* fewer views per post both land here. |
+| **views** | views per post, same two years — isolates "each post reaches fewer people" from "just posts less often". |
+| **cadence** | posts per month, trailing 6 complete months vs the prior 12 — the sharper, more recent read on posting having slowed (e.g. 35/mo → 10/mo). |
+| **forwards** | forwards per post, same trailing-6-vs-prior-12 window — reported only, never gates the verdict (one viral month swings it too hard). |
+
+**Verdict** (driven by yearly reach, except abandonment which is about
+posting stopping):
+
+- **abandoned** — nothing posted in the trailing 6 months, or cadence down to <15% of before.
+- **stalling** — yearly reach under 40% of the prior year.
+- **slowing** — yearly reach under 70%.
+- **active** — everything else.
+- *blank* — under ~16 months of history, or a prior year too thin (<12 posts) to compare.
+
+**Feeds the composite Rating.** `app/rating.py`'s `activity_trend_penalty`
+docks a channel's score by a flat fraction per verdict — **20%** `slowing`,
+**33%** `stalling`, **50%** `abandoned` — applied after the reach bonus so a
+former heavyweight feels it too (`active`, or too little history to judge,
+costs nothing). The Folders card's Markdown export passes each channel's
+trend into `score_entries` (`_collect_export_metrics`), computed over the
+whole monthly history regardless of the export's period picker, so a
+winding-down channel ranks below a live one; a footnote in the export
+spells the penalty out. Pure local computation from the stored checkpoint;
+`channel_activity_trend` is view-agnostic and reusable anywhere a channel's
+monthly series is on hand.
 
 ## Requirements
 
@@ -715,6 +859,11 @@ config folder** to jump straight there.
 - **`mentions.md`** — the Mentions view's `id | names | unclear links`
   table; unlike `tags.json`'s source file, the app both reads *and writes*
   this one directly (see app/mentions.py).
+- **`cross_mentions.json`** — the Mutual PR view's Channel links card cache
+  (which tracked channels link to which others — see
+  [Cross-channel mentions](#cross-channel-mentions)), one shared file for
+  the whole tracked base, written whenever its Calculate/Recalculate button
+  runs.
 - **`name_exceptions.txt`** — plain text, one entry per line, of text the
   Mentions view's NER extraction should never treat as a person name (built
   in: "Мастер-класс"). Grows via the Names Found table's **Ignore** button;
@@ -739,6 +888,8 @@ app/
 ├── folders.py              # folder definitions + channel assignments
 ├── tags.py                 # tag taxonomy loaded from a Markdown table
 ├── mentions.py              # mentions.md store (app-owned, live-edited) + NER extraction
+├── cross_mentions.py       # cross-channel link matching (Mutual PR's Channel links card)
+├── activity.py             # year-over-year channel activity trend
 ├── periods.py              # month/season/rolling-year period-key helpers
 ├── media_cache.py          # on-disk thumbnail cache paths
 ├── scoring.py              # per-post content-quality formula (shared)

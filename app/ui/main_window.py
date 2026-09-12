@@ -307,6 +307,18 @@ class MainWindow(QMainWindow):
             self._show_config()
 
     def _on_channel_fetched(self, payload: dict) -> None:
+        # A fresh fetch (no `key` of its own yet) would otherwise land under
+        # a key derived from whatever @username was typed (see
+        # store.channel_key) — if that's a channel already tracked under a
+        # different key (typically: it renamed, and the new handle was
+        # typed here instead of using Refresh), reuse its existing key so
+        # this updates that same checkpoint instead of creating a
+        # disconnected duplicate for what's really one channel. See
+        # store.ChannelStore.find_by_channel_id.
+        channel_id = (payload.get("info") or {}).get("id")
+        existing_key = self.store.find_by_channel_id(channel_id)
+        if existing_key:
+            payload["key"] = existing_key
         key = self.store.save(payload)
         self._refresh_sidebar()
         self._show_channel(key)

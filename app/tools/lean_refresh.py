@@ -317,6 +317,15 @@ async def _full_refresh(client, data: dict, ctx, period: str | None = None) -> s
     if payload.get("cancelled"):
         return "cancelled"
     payload["key"] = data.get("key")
+    # run_channel_stat already refreshes `username`/`link` from this fetch's
+    # own resolved entity, but leaves `channel` (the resolve hint for next
+    # time) as whatever was passed in -- `params["channel"]`, above, which
+    # is this checkpoint's own possibly-stale value. Move it to the live
+    # handle too, so a renamed channel stops needing resolve_entity's
+    # fallback_id path on every future refresh (see the same fix in
+    # _refresh_one).
+    if payload.get("username"):
+        payload["channel"] = f"@{payload['username']}"
     data.clear()
     data.update(payload)
     return f"full re-fetch ({period})" if period else "full re-fetch (no monthly history to merge)"
@@ -353,6 +362,34 @@ async def _refresh_one(client, data: dict, ctx) -> str:
         data.setdefault("info", {})["about"] = info["about"]
     if info.get("title"):
         data["title"] = info["title"]
+    # A channel's public @username can change (or be dropped) without its
+    # internal numeric id changing -- resolve_entity's fallback_id is what
+    # lets the resolve above survive that, but nothing used to carry the new
+    # username back into the checkpoint: `username`/`link` stayed pinned to
+    # whatever the channel was called the very first time it was fetched,
+    # even after it renamed itself, so every "Open" link and Mentions'
+    # own-channel check (app.mentions.tg_identity_key(data["link"])) kept
+    # pointing at the old, dead handle. Synced here from this fetch's own
+    # live `info`, same as _full_refresh's fresh payload already gets for
+    # free.
+    new_username = info.get("username") or ""
+    if new_username != (data.get("username") or ""):
+        data["username"] = new_username
+        data.setdefault("info", {})["username"] = new_username
+        data["link"] = (f"https://t.me/{new_username}" if new_username
+                        else (f"https://t.me/c/{info['id']}" if info.get("id")
+                              else data.get("link", "")))
+    # `channel` (the ref tried first on the *next* resolve) is checked
+    # separately from the block above, not folded into its `if` -- a
+    # checkpoint whose `username`/`link` already got fixed once (e.g. by a
+    # _full_refresh, which has always kept them current) but predates this
+    # fix would otherwise never trip the "username changed" branch again
+    # and stay stuck resolving through fallback_id forever. Only ever moves
+    # to a new handle, never blanked -- if the channel dropped its username
+    # entirely, the stale ref is still a marginally better first guess than
+    # nothing, and fallback_id covers either case regardless.
+    if new_username and data.get("channel") != f"@{new_username}":
+        data["channel"] = f"@{new_username}"
 
     if data.get("fetch_public") and fresh_ids and not ctx.cancelled():
         try:

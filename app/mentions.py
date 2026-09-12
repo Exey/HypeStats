@@ -94,6 +94,7 @@ import os
 import re
 import tempfile
 import time
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -158,6 +159,14 @@ _WORD_RE = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)*", re.UNICODE)
 
 def _words(text: str) -> list[str]:
     return _WORD_RE.findall(text)
+
+
+@lru_cache(maxsize=20_000)
+def _casefolded_words(text: str) -> tuple[str, ...]:
+    """`_words` casefolded, memoized — the same mentions.md name candidates
+    are split and folded against every post/anchor text in a scan (see
+    find_known_names_in_text)."""
+    return tuple(w.casefold() for w in _WORD_RE.findall(text))
 
 
 def _word_substring_match(candidate: str, needle: str) -> bool:
@@ -234,7 +243,8 @@ def _ru_stem(word: str) -> str:
 _RU_LEMMA_MIN_SCORE = 0.1
 
 
-def _ru_lemmas(word: str) -> set[str]:
+@lru_cache(maxsize=100_000)
+def _ru_lemmas(word: str) -> frozenset[str]:
     """Dictionary forms pymorphy3 considers plausible for (already
     casefolded) `word`, scored at least _RU_LEMMA_MIN_SCORE — a set, not
     just the top guess, because pymorphy3 ranks genuinely ambiguous forms
@@ -245,16 +255,21 @@ def _ru_lemmas(word: str) -> set[str]:
     it was fixed: pymorphy3 does have a real parse of "иванов" as a rare
     plural form of "иван" ("у нас пять Иванов"), just at ~1% likelihood
     against the ~96% surname reading, so it's excluded by the floor.
-    {_ru_stem(word)} if pymorphy3 isn't installed or fails on this word."""
+    {_ru_stem(word)} if pymorphy3 isn't installed or fails on this word.
+
+    Memoized: the same words recur constantly — every mentions.md name
+    candidate against every post/anchor text — and a pymorphy3 parse is
+    orders of magnitude costlier than a dict hit (this is what made a
+    full-history classify take minutes; see find_known_names_in_text)."""
     morph = _get_morph()
     if morph is None:
-        return {_ru_stem(word)}
+        return frozenset({_ru_stem(word)})
     try:
         parses = morph.parse(word)
         lemmas = {p.normal_form for p in parses if p.score >= _RU_LEMMA_MIN_SCORE}
-        return lemmas or {p.normal_form for p in parses} or {word}
+        return frozenset(lemmas or {p.normal_form for p in parses} or {word})
     except Exception:  # noqa: BLE001 - a single bad word shouldn't break a match
-        return {_ru_stem(word)}
+        return frozenset({_ru_stem(word)})
 
 
 def _names_declension_match(a: str, b: str) -> bool:
@@ -378,7 +393,7 @@ def tg_has_post_id(url: str) -> bool:
 
 
 # A row's "id" column typed as a bare t.me/telegram.me link, with or
-# without a scheme -- see _normalize_row_identity.
+# without a scheme -- see normalize_row_identity.
 _URL_LIKE_ID_RE = re.compile(r"^(?:https?://)?(?:www\.)?(?:t\.me|telegram\.me)/", re.IGNORECASE)
 # A plausible bare Telegram username (Telegram's own rule: starts with a
 # letter, 5-32 characters total) -- as opposed to a ФИО id like "Ирина
@@ -386,7 +401,7 @@ _URL_LIKE_ID_RE = re.compile(r"^(?:https?://)?(?:www\.)?(?:t\.me|telegram\.me)/"
 _BARE_USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{4,31}$")
 
 
-def _normalize_row_identity(raw_id: str) -> str:
+def normalize_row_identity(raw_id: str) -> str:
     """A mentions.md row's own "id" column, canonicalized to the same
     "@username" (or bare internal-id) shape tg_identity_key(url) returns —
     someone can type a row's id as "@geekography", "geekography" (no @),
@@ -412,7 +427,7 @@ def _normalize_row_identity(raw_id: str) -> str:
 def resolve_telegram_link(url: str, texts: list[str], store: MentionsStore) -> dict | None:
     """The mentions.md row (if any) already known for Telegram `url` --
     checked first by identity (tg_identity_key(url) against every row's
-    own id, normalized -- see _normalize_row_identity -- since a row's id
+    own id, normalized -- see normalize_row_identity -- since a row's id
     might be spelled "@user", "user", or a full t.me link; identity is the
     only thing that works for a private channel anyway, whose row has no
     username to go by, just its raw internal id), then by whether any of
@@ -430,7 +445,7 @@ def resolve_telegram_link(url: str, texts: list[str], store: MentionsStore) -> d
     if key is not None:
         needle = key.casefold()
         for row in store.rows:
-            if _normalize_row_identity(row.get("id") or "").casefold() == needle:
+            if normalize_row_identity(row.get("id") or "").casefold() == needle:
                 return row
     for text in texts:
         row = store.find_row(text)
@@ -667,17 +682,31 @@ def find_known_names_in_text(text: str, known: list[str]) -> list[str]:
     if not words:
         return []
     cwords = [w.casefold() for w in words]
+    cword_set = set(cwords)
+    # Lemma set per text word, once — this was recomputed inside the
+    # candidate × window-position loops below, which is what made a
+    # full-history scan (hundreds of candidates × dozens of texts) take
+    # minutes. With _ru_lemmas memoized, the needle-side calls are ~free.
+    word_lemmas = [_ru_lemmas(w) if len(w) >= 3 else frozenset() for w in cwords]
+    text_lemmas = frozenset().union(*word_lemmas) if word_lemmas else frozenset()
+
     found: dict[str, None] = {}
     for name in known:
-        needle = [w.casefold() for w in _words(name)]
+        needle = _casefolded_words(name)
         if not needle:
+            continue
+        # Cheap reject: unless every needle word is at least lemma-reachable
+        # from some text word, no window can match — skips ~all candidates
+        # before the O(positions) scan.
+        if not all(w in cword_set or (len(w) >= 3 and _ru_lemmas(w) & text_lemmas)
+                   for w in needle):
             continue
         n = len(needle)
         for i in range(len(cwords) - n + 1):
-            window = cwords[i:i + n]
-            if window == needle or all(
-                    x == y or (len(x) >= 3 and len(y) >= 3 and _ru_lemmas(x) & _ru_lemmas(y))
-                    for x, y in zip(window, needle)):
+            if all(cwords[i + k] == needle[k]
+                   or (len(needle[k]) >= 3 and word_lemmas[i + k]
+                       and _ru_lemmas(needle[k]) & word_lemmas[i + k])
+                   for k in range(n)):
                 found.setdefault(" ".join(words[i:i + n]), None)
                 break
     return list(found)
@@ -1182,3 +1211,15 @@ def cache_channel_mentions(data: dict, cache: dict) -> None:
     to persist in the same write)."""
     data["mentions_cache"] = {**cache, "calculated_at":
                               time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+
+
+def mentions_cache_calculated(data: dict) -> bool:
+    """True once compute_channel_mentions_cache has actually run for this
+    checkpoint and been stored (see cache_channel_mentions) — keyed on the
+    `calculated_at` stamp, NOT on `fairness_pct`, which is legitimately None
+    for a channel with no fair/fake links at all. A lean recalc
+    (tools.mentions_export.run_fairness_calculate) and the Dashboard's
+    Ethics card both use this to tell "already done, score just happens to
+    be —" apart from "never calculated", so a —-scoring channel is skipped
+    on re-runs instead of recomputed from scratch every pass."""
+    return bool((data.get("mentions_cache") or {}).get("calculated_at"))

@@ -114,6 +114,15 @@ class ChannelStore:
                 # Already parsed into `data` above, so surfacing it here
                 # costs nothing extra.
                 "fairness_pct": (data.get("mentions_cache") or {}).get("fairness_pct"),
+                # Whether the Ethics/Mentions cache has actually been
+                # computed for this channel (see
+                # app.mentions.mentions_cache_calculated) -- distinct from
+                # `fairness_pct`, which stays None for a channel that was
+                # calculated but has no fair/fake links. Lets the Folders
+                # MD export show "calculated, no score" as "—" and "never
+                # calculated" as blank.
+                "mentions_calculated": bool(
+                    (data.get("mentions_cache") or {}).get("calculated_at")),
             })
         out.sort(key=lambda d: d.get("fetched_at", ""), reverse=True)
         return out
@@ -124,3 +133,24 @@ class ChannelStore:
             path.unlink()
             return True
         return False
+
+    def find_by_channel_id(self, channel_id: int | None) -> str | None:
+        """The key of whichever tracked checkpoint already carries this
+        channel's own internal Telegram id (`info.id` — stable across a
+        @username rename or drop, unlike the id-derived key a *new* fetch
+        would otherwise get via channel_key(), which is username-shaped).
+        None if `channel_id` is falsy or nothing matches.
+
+        Lets a fresh "fetch by @username" typed after a channel renamed
+        (rather than using Refresh, which already survives a rename via
+        resolve_entity's fallback_id) recognize it's the same channel it
+        already tracks under the old handle's key, and update that
+        checkpoint in place instead of the fetch silently creating a
+        second, disconnected entry for what's really one channel — see
+        app.ui.main_window._on_channel_fetched."""
+        if not channel_id:
+            return None
+        for summary in self.list():
+            if summary.get("channel_id") == channel_id:
+                return summary["key"]
+        return None

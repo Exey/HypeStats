@@ -77,6 +77,14 @@ EN = {
                                       "just channels that already have a "
                                       "tag assigned (any tag).",
     "folder_export_col_ethics": "Ethics",
+    "folder_export_rating_trend_note": "_Rating is docked for a channel whose "
+                                       "year-over-year activity is slowing "
+                                       "(−20%), stalling (−33%) or abandoned "
+                                       "(−50%)._",
+    "folder_export_alltime_note": "_Ethics is computed over each channel's "
+                                  "whole parsed history; the period above only "
+                                  "scopes Rating / Views / Viral share / Post "
+                                  "Quality._",
     "folder_mentions_refresh_label": "Refresh mentions for:",
     "folder_mentions_refresh_btn": "🔗 Refresh mentions",
     "folder_mentions_refresh_hint": "Re-fetch just the links in every "
@@ -203,10 +211,6 @@ EN = {
                               "from each channel's top posts. Needs \"Include "
                               "public reposts\" enabled when a channel was fetched.",
     "folder_stat_links_empty": "No cross-channel reposts found.",
-    "col_link_source": "Source",
-    "col_link_target": "Target",
-    "col_link_reposts": "Reposts",
-    "col_link_example": "Example",
     "folder_stat_period_title": "Periodic stats",
     "folder_stat_period_hint": "Per-period views/shares/reactions/viral share "
                                "and the featured post are computed from each "
@@ -255,17 +259,40 @@ EN = {
     "col_forecast_week": "Week forecast",
     "col_forecast_month": "Month forecast",
     "col_best_days": "Best days to post",
+    "activity_verdict_active": "active",
+    "activity_verdict_slowing": "slowing",
+    "activity_verdict_stalling": "stalling",
+    "activity_verdict_abandoned": "abandoned",
+    "mutual_pr_activity_tooltip": "Activity: {verdict} (forecast reduced {pct}%)",
     # mutual pr — cross-channel reposts table (moved here from Folder Stats)
     "mutual_pr_links_title": "Channel links",
-    "mutual_pr_links_hint": "Reposts between the channels shown above, detected "
-                            "from each channel's top posts. Needs \"Include "
-                            "public reposts\" enabled when a channel was fetched.",
-    "mutual_pr_links_empty": "No cross-channel reposts found.",
+    "mutual_pr_links_hint": "Which tracked channels already link to which "
+                            "others, from every t.me link found in a post's "
+                            "caption — not just Telegram's own \"public "
+                            "forward\" stat, so this works even without "
+                            "\"Include public reposts\" enabled. Cached: press "
+                            "Calculate/Recalculate to (re)scan the whole "
+                            "tracked base.",
+    "mutual_pr_links_empty": "No cross-channel links found — press Calculate, "
+                             "or widen the folder filter above.",
+    "mutual_pr_links_calc_btn": "Calculate",
+    "mutual_pr_links_recalc_btn": "Recalculate",
+    "mutual_pr_links_calculating": "Calculating…",
+    "mutual_pr_links_calculated_at": "Calculated {when}",
+    "mutual_pr_links_col_channel": "Channel",
+    "mutual_pr_links_col_by": "Mentioned by",
+    "mutual_pr_links_col_count": "Mentions",
+    "mutual_pr_links_col_top_source": "Top source",
+    "mutual_pr_links_also": "Also mentioned by: {names}",
     # mutual pr — MPR Pairs (card + Markdown export)
     "mutual_pr_partners_title": "MPR Pairs",
     "mutual_pr_partners_hint": "\"Best posting days\" shows each channel's own "
                                "best days (A / B); ★ marks the days that are a "
-                               "good ad slot in both channels at once.",
+                               "good ad slot in both channels at once. Excludes "
+                               "any pair the Channel links card already shows "
+                               "as connected (see above), and keeps at most 16 "
+                               "of any one channel's own best pairs, so one "
+                               "generalist channel can't crowd out the rest.",
     "mutual_pr_partners_empty": "No channel pairs to rank yet.",
     "mutual_pr_partners_col_a": "Channel A",
     "mutual_pr_partners_col_b": "Channel B",
@@ -570,6 +597,7 @@ EN = {
                       "mentions outnumber the fair ones. Not calculated "
                       "yet? Press Calculate below.",
     "dash_ethics_calc_btn": "Calculate",
+    "dash_ethics_recalc_btn": "Recalculate",
     "dash_ethics_calculating": "Calculating…",
     "dash_ethics_none": "Not enough link data to calculate Ethics for this "
                         "channel — it may predate `all_links`, need a "
@@ -698,6 +726,14 @@ RU = {
                                       "до каналов, у которых уже есть "
                                       "тег (любой).",
     "folder_export_col_ethics": "Этика",
+    "folder_export_rating_trend_note": "_«Рейтинг» снижается для канала, чья "
+                                       "активность год к году замедляется "
+                                       "(−20%), затухает (−33%) или заброшена "
+                                       "(−50%)._",
+    "folder_export_alltime_note": "_«Этика» считается по всей распарсенной "
+                                  "истории канала; период выше влияет только на "
+                                  "«Рейтинг» / «Просмотры» / «Долю виральных» / "
+                                  "«Качество постов»._",
     "folder_mentions_refresh_label": "Обновить ссылки для:",
     "folder_mentions_refresh_btn": "🔗 Обновить ссылки",
     "folder_mentions_refresh_hint": "Заново получить только ссылки для "
@@ -822,10 +858,6 @@ RU = {
                               "по топ-постам каждого канала. Требует включённой "
                               "опции «Публичные репосты» при сборе канала.",
     "folder_stat_links_empty": "Репостов между каналами не найдено.",
-    "col_link_source": "Источник",
-    "col_link_target": "Куда",
-    "col_link_reposts": "Репосты",
-    "col_link_example": "Пример",
     "folder_stat_period_title": "Статистика по периодам",
     "folder_stat_period_hint": "Просмотры/репосты/реакции/доля виральных по "
                                "периодам и показанный пост считаются по "
@@ -879,18 +911,41 @@ RU = {
     "col_forecast_week": "Прогноз неделя",
     "col_forecast_month": "Прогноз месяц",
     "col_best_days": "Лучшие дни для поста",
+    "activity_verdict_active": "активен",
+    "activity_verdict_slowing": "замедляется",
+    "activity_verdict_stalling": "затухает",
+    "activity_verdict_abandoned": "заброшен",
+    "mutual_pr_activity_tooltip": "Активность: {verdict} (прогноз снижен на {pct}%)",
     # mutual pr — таблица репостов между каналами (перенесена из «Статистики папки»)
     "mutual_pr_links_title": "Связи каналов",
-    "mutual_pr_links_hint": "Репосты между показанными выше каналами, "
-                            "определённые по топ-постам каждого канала. "
-                            "Требует включённой опции «Публичные репосты» при "
-                            "сборе канала.",
-    "mutual_pr_links_empty": "Репостов между каналами не найдено.",
+    "mutual_pr_links_hint": "Какие отслеживаемые каналы уже ссылаются друг на "
+                            "друга — по каждой ссылке t.me в подписи поста, а "
+                            "не только по официальной статистике "
+                            "«публичных репостов» Telegram, так что работает "
+                            "даже без включённой опции «Публичные репосты». "
+                            "Кешируется: нажмите «Рассчитать»/«Пересчитать», "
+                            "чтобы просканировать всю базу заново.",
+    "mutual_pr_links_empty": "Связей между каналами не найдено — нажмите "
+                             "«Рассчитать» либо расширьте фильтр по папке "
+                             "выше.",
+    "mutual_pr_links_calc_btn": "Рассчитать",
+    "mutual_pr_links_recalc_btn": "Пересчитать",
+    "mutual_pr_links_calculating": "Расчёт…",
+    "mutual_pr_links_calculated_at": "Рассчитано {when}",
+    "mutual_pr_links_col_channel": "Канал",
+    "mutual_pr_links_col_by": "Упомянут",
+    "mutual_pr_links_col_count": "Упоминания",
+    "mutual_pr_links_col_top_source": "Основной источник",
+    "mutual_pr_links_also": "Также упоминают: {names}",
     # mutual pr — «Пары ВП» (карточка + экспорт Markdown)
     "mutual_pr_partners_title": "Пары ВП",
     "mutual_pr_partners_hint": "«Лучшие дни для поста» — свои лучшие дни "
                                "каждого канала (A / B); ★ отмечает дни, "
-                               "удобные для рекламы сразу в обоих каналах.",
+                               "удобные для рекламы сразу в обоих каналах. "
+                               "Исключены пары, уже показанные связанными в "
+                               "карточке «Связи каналов» выше, и оставлено не "
+                               "более 16 лучших пар для каждого канала, чтобы "
+                               "один канал-универсал не вытеснял остальные.",
     "mutual_pr_partners_empty": "Пока нет пар каналов для оценки.",
     "mutual_pr_partners_col_a": "Канал A",
     "mutual_pr_partners_col_b": "Канал B",
@@ -1189,6 +1244,7 @@ RU = {
                       "упоминаний больше, чем честных. Ещё не "
                       "рассчитано? Нажмите «Рассчитать» ниже.",
     "dash_ethics_calc_btn": "Рассчитать",
+    "dash_ethics_recalc_btn": "Пересчитать",
     "dash_ethics_calculating": "Расчёт…",
     "dash_ethics_none": "Недостаточно данных по ссылкам, чтобы "
                         "рассчитать Этику для этого канала — возможно, "

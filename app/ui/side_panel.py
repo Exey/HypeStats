@@ -33,6 +33,7 @@ class SidePanel(QFrame):
     folder_stat_selected = Signal()
     content_quality_selected = Signal()
     mutual_pr_selected = Signal()
+    ad_campaign_selected = Signal()
     channel_selected = Signal(str)   # checkpoint key
     compare_requested = Signal(list)  # 2-8 checkpoint keys
     compare_mode_off = Signal()
@@ -143,12 +144,30 @@ class SidePanel(QFrame):
         root.addWidget(_bordered(self.content_quality_btn))
         root.addSpacing(4)
 
-        self.mutual_pr_btn = NavButton(None, i18n.tr("nav_mutual_pr"))
+        # Mutual PR and Ad Campaign share one row — both are about promoting
+        # a channel, and two half-width pills fit where a full-width one
+        # each would push the channel list down a row further. Like the
+        # Charts / Metrics / Mentions row below, that only fits with short
+        # plain labels (no emoji prefix), hence nav_mutual_pr_short and the
+        # compact NavButton.
+        promo_row = QHBoxLayout()
+        promo_row.setSpacing(6)
+        self.mutual_pr_btn = NavButton(None, i18n.tr("nav_mutual_pr_short"), compact=True)
+        self.mutual_pr_btn.setToolTip(i18n.tr("nav_mutual_pr"))
         self.mutual_pr_btn.setMinimumHeight(sp(36))
         self.mutual_pr_btn.setStyleSheet(f"padding: {sp(4)}px 0px; border: none;")
         self.mutual_pr_btn.clicked.connect(lambda: self.mutual_pr_selected.emit())
         self.group.addButton(self.mutual_pr_btn)
-        root.addWidget(_bordered(self.mutual_pr_btn))
+        promo_row.addWidget(_bordered(self.mutual_pr_btn), 1)
+
+        self.ad_campaign_btn = NavButton(None, i18n.tr("nav_ad_campaign"), compact=True)
+        self.ad_campaign_btn.setMinimumHeight(sp(36))
+        self.ad_campaign_btn.setStyleSheet(f"padding: {sp(4)}px 0px; border: none;")
+        self.ad_campaign_btn.setToolTip(i18n.tr("nav_ad_campaign_hint"))
+        self.ad_campaign_btn.clicked.connect(lambda: self.ad_campaign_selected.emit())
+        self.group.addButton(self.ad_campaign_btn)
+        promo_row.addWidget(_bordered(self.ad_campaign_btn), 1)
+        root.addLayout(promo_row)
         root.addSpacing(4)
 
         # Compare Charts + Compare Metrics + Mentions share one row — none is
@@ -499,6 +518,9 @@ class SidePanel(QFrame):
     def select_mutual_pr(self) -> None:
         self.mutual_pr_btn.setChecked(True)
 
+    def select_ad_campaign(self) -> None:
+        self.ad_campaign_btn.setChecked(True)
+
     def select_channel(self, key: str) -> None:
         btn = self._channel_btns.get(key)
         if btn:
@@ -514,7 +536,10 @@ class SidePanel(QFrame):
         self.config_btn.set_text(self.i18n.tr("nav_config"))
         self.folder_stat_btn.set_text(self.i18n.tr("nav_folder_stat"))
         self.content_quality_btn.set_text(self.i18n.tr("nav_content_quality"))
-        self.mutual_pr_btn.set_text(self.i18n.tr("nav_mutual_pr"))
+        self.mutual_pr_btn.set_text(self.i18n.tr("nav_mutual_pr_short"))
+        self.mutual_pr_btn.setToolTip(self.i18n.tr("nav_mutual_pr"))
+        self.ad_campaign_btn.set_text(self.i18n.tr("nav_ad_campaign"))
+        self.ad_campaign_btn.setToolTip(self.i18n.tr("nav_ad_campaign_hint"))
         self.empty_lbl.setText(self.i18n.tr("nav_no_channels"))
         self.compare_btn.setText(self.i18n.tr("nav_compare"))
         self.compare_btn.setToolTip(self.i18n.tr("nav_compare_hint"))

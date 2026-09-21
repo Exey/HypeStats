@@ -401,9 +401,14 @@ class NavButton(QPushButton):
     icon_name=None skips the SVG icon column entirely — for entries whose
     label already carries its own emoji (e.g. "📁 Folder Stats") and don't
     want a second, redundant icon on top of it.
+
+    compact=True is for a half-width pill sharing a row with another one: a
+    short, centred label with tighter margins and no meta column (an empty
+    meta label would still cost a layout-spacing gap).
     """
 
-    def __init__(self, icon_name: str | None, text: str, parent=None) -> None:
+    def __init__(self, icon_name: str | None, text: str, parent=None,
+                 compact: bool = False) -> None:
         super().__init__(parent)
         self.setObjectName("navBtn")
         self.setCheckable(True)
@@ -414,8 +419,8 @@ class NavButton(QPushButton):
         self._badge_tooltip: str | None = None
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 0, 12, 0)
-        lay.setSpacing(12)
+        lay.setContentsMargins(*((6, 0, 6, 0) if compact else (12, 0, 12, 0)))
+        lay.setSpacing(0 if compact else 12)
         self._icon = QLabel()
         self._icon.setFixedSize(22, 22)
         self._icon.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -425,11 +430,14 @@ class NavButton(QPushButton):
             self._icon.setVisible(False)
         self._label = QLabel(text)
         self._label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        if compact:
+            self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self._label, 1)
 
         self._meta = QLabel()
         self._meta.setObjectName("navMeta")
         self._meta.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._meta.setVisible(not compact)
         lay.addWidget(self._meta)
 
         self.setMinimumHeight(sp(46))

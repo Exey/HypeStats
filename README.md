@@ -29,33 +29,34 @@ equivalent.
 
 ## What it does
 
-For a chosen channel and time window, a single pass over the channel's history
-produces one JSON checkpoint holding:
+**Know which Telegram channels are actually worth your time — and your ads.**
 
-- **Engagement ranking** — per-post views, reactions, forwards ("private
-  reposts"), comments, media type, links (both a plain URL typed in the
-  caption and a "text link"'s real target, which Telegram never puts in the
-  plain message text — see **Refresh mentions** below), and whether the
-  post was itself forwarded in from another channel (plus that forward's
-  origin, when Telegram exposes it — the Mentions view uses this), with
-  albums merged into one row. It keeps the union of the top-N by each metric
-  *plus* the most recent top-N
-  *plus* the best post of every calendar month, so the on-screen table can
-  re-sort by any column and still show the true leaders, and the
-  quality/recent views never silently drop a month. Optionally fetches
-  **public reposts** for that pool (which channels re-shared each post),
-  where stats access allows.
-- **Activity analytics** — member count, creation date, posts/day,
-  average/max views, average/max reposts, average reactions, share of posts
-  with media, "settled" average views (posts older than 14 days, whose view
-  count has stopped climbing), a trimmed repost average, viral-post share,
-  and distributions by **hour of day**, **day of week**, and **month** (with
-  per-month view/share/reaction totals over *every* scanned post, not just
-  the top-N sample).
+Point HypeStats at any channel, pick a period, and in a single pass get a
+full picture: the posts that really took off, how engaged the audience truly
+is, when the channel posts best, and whether it's still alive or quietly
+fading. No more guessing from a subscriber count.
 
-Each analyzed channel is saved as its own JSON checkpoint and listed in the
-sidebar, so closing the app (or a crash mid-scan) never loses a fetch and you
-can re-open any channel instantly without re-scanning Telegram.
+- 🏆 **Find the real winners** — top posts ranked by views, reactions,
+  reposts and comments, plus a content-quality score that rewards posts
+  beating their own reach, not just big numbers.
+- 📊 **See the whole story** — engagement rates, virality, and trends by
+  hour, weekday and month, with gorgeous native charts.
+- ⚖️ **Compare channels side by side** — metrics, overlaid trend charts, and
+  who mentions whom.
+- 🤝 **Plan ad swaps with confidence** — follower-gain forecasts and ranked
+  "mutual PR" partner matches for your channel group.
+- 📣 **Plan a paid ad campaign** — give it a follower target, a period and a
+  budget; get a priced timeline of placements across your tracked channels,
+  timed to when each one's audience is heating up.
+- 🧭 **Spot fakes & fading channels** — Ethics score for mention fairness and
+  an activity trend that flags abandoned channels before you pay for an ad.
+- 📁 **Stay organized** — folders, tags, one-click incremental refresh, and
+  Markdown export of everything. Every fetch is saved, so nothing is ever
+  re-scanned unless you want it to be.
+
+Details on how every number is calculated are in
+[Statistical Calculation Methodology](#statistical-calculation-methodology)
+at the bottom.
 
 ## Features
 
@@ -296,6 +297,36 @@ days that suit both at once. The **Markdown export** keeps
 the main forecast table intact and appends just the MPR Pairs table
 (`## Пары ВП`) — neither Channel links nor its own export button feed it.
 
+### Ad Campaign view (`📣`)
+
+Sits next to Mutual PR in the sidebar. Turns "I want N followers for B money
+by date D" into a plan of paid placements across the channels you track.
+It starts from one row of inputs — **Target followers** (default 1 000),
+**Period** (2 weeks / 1 month / until a chosen date), **Budget** (default
+15 000, any currency — type its symbol next to the amount), **Price for 1
+follower** (default 22) and, optionally, **Your channel** (ID, `@username`,
+t.me link or title) — and re-plans live as you change any of them.
+
+- **Tiles** — spend, expected followers vs the target, cost per follower and
+  the number of placements (and how many sit in a prime era).
+- **Best posts to repost** — only when your channel is one of the tracked
+  ones: its three highest-Quality posts ([per-post quality](#per-post-content-quality)),
+  as post cards, to repost into partner channels or lift media from
+  (thumbnails appear once fetched in High-Quality Posts).
+- **How to reach the target** — what the target costs at your price, the
+  daily pace it implies, whether the plan covers it (or how much more budget
+  it would take), which picked channels are in a prime era, when the first ad
+  goes live and the last ends, and — with your channel known — similar-size
+  channels you could swap posts with for free instead (see Mutual PR).
+- **Ad timeline** — a Gantt, one block per placement: the channel and its
+  price, the block's **width being the placement period** (24 h … 1 month),
+  coloured by the channel's prime-era state. **Click a block** to swap in
+  another channel (the list is ranked, budget-checked), remove it, or mark
+  the channel as *doesn't sell ads* — it's replaced and stays excluded until
+  you press the reset button. Hover a block for its full breakdown.
+
+See [Ad campaign planning](#ad-campaign-planning) for the maths.
+
 ### Login, profiles, connection settings
 
 - **Two login flows** — QR code (scan from Telegram → Settings → Devices) or
@@ -361,7 +392,218 @@ the main forecast table intact and appends just the MPR Pairs table
   retried automatically with backoff.
 - Charts are drawn natively with QPainter — no matplotlib or QtCharts.
 
-## Stats & scoring algorithms
+## Requirements
+
+- Python 3.12+ (developed on 3.12)
+- Telegram API credentials — an **API_ID** and **API_HASH** from
+  [my.telegram.org](https://my.telegram.org)
+
+## Installation
+
+Prefer [`run_dev.sh` / `run_dev.bat`](#run-from-source) above — this is the
+manual equivalent if you'd rather manage the environment yourself:
+
+```bash
+# from the project root
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+python3 main.py                  # Windows: python main.py
+```
+
+Dependencies (`requirements.txt`):
+
+- `PySide6>=6.6` — Qt GUI
+- `telethon>=1.34` — Telegram client
+- `qrcode[pil]>=7.4` — renders the QR-code login image
+- `mawo-slovnet>=1.0.7` — Russian person/location/org NER for the Mentions
+  view (app/mentions.py); downloads its model on first use, then works
+  offline. If it's missing or the download fails, Mentions still shows post
+  texts, just without extracted names (see `extraction_available` in
+  app/mentions.py) — nothing else in the app depends on it. Its main gap is
+  recall on short, casual mentions (a bare first name like "Марина" in a
+  sentence with no surname) — `find_known_names_in_text` (see below and
+  `pymorphy3`) backstops that for names already in `mentions.md`, without
+  pulling in a heavier model. A multilingual BERT model
+  ([Babelscape/wikineural-multilingual-ner](https://huggingface.co/Babelscape/wikineural-multilingual-ner)
+  via `transformers[torch]`) genuinely fixed that recall gap outright when
+  tried — installed and tested side by side, not assumed — but a packaged
+  build went from ~90MB to ~726MB over it, so it was reverted; a rule-based
+  alternative (genuine `natasha`'s `NamesExtractor`) was also tried and
+  reverted after it mistagged ordinary words ("и", "без", "Просто") as
+  names on the same test sentences. DeepPavlov never got that far — its
+  latest release pins `numpy<1.24`, which has no Python 3.12 wheels
+  (confirmed by a failed install, not just its docs).
+- `pymorphy3>=2.0` — Russian morphological analysis, used two ways in
+  app/mentions.py: `MentionsStore.find_row`'s declension-matching tier
+  (mentions.md's "Алиса" matches an extraction of "Алисой"/"Алисы", or
+  "Лина Рязанская" matches "Лину Рязанскую" — an adjectival surname,
+  correctly lemmatized, which a hand-rolled suffix list — kept as the
+  fallback when pymorphy3 isn't installed — can't do), and
+  `find_known_names_in_text`'s plain dictionary-scan fallback mentioned
+  above. Picked over pymorphy2 (and genuine `natasha`, which uses pymorphy2
+  internally) because pymorphy2 imports `pkg_resources`, removed from
+  `setuptools>=81`; pymorphy3 doesn't need that pin.
+
+## Building standalone binaries
+
+`build.sh` / `build.bat` package the app into a standalone binary (no Python
+install required to run it) via [PyInstaller](https://pyinstaller.org/):
+
+```bash
+./build.sh          # macOS / Linux
+build.bat           # Windows
+```
+
+## Getting API credentials
+
+1. Open [my.telegram.org](https://my.telegram.org) and log in with your phone
+   number (Telegram sends the code to your Telegram app).
+2. Click **API development tools**.
+3. Fill in *App title* and *Short name* (any text), platform *Desktop*, then
+   create the application.
+4. Copy **App api_id** → `API_ID` and **App api_hash** → `API_HASH`.
+5. `PHONE_NUMBER` must be in international format, e.g. `+79001234567`.
+
+## Usage
+
+Launch with [`run_dev.sh` / `run_dev.bat`](#run-from-source) (or `python3
+main.py` in an activated venv), then:
+
+1. On the **Config** screen, enter your `API_ID`, `API_HASH` and
+   `PHONE_NUMBER` (or import a `.env`), then authorize — QR code is the quick
+   path.
+2. In **Fetch a channel**, enter a channel by `@username`, `t.me` link, or
+   `-100…` ID, choose how many top posts to keep per metric and the period of
+   analysis, and (optionally) enable public-repost lookup.
+3. Click **Fetch & analyze**. The channel appears in the sidebar with its
+   dashboard; **Refresh** for a lean (incremental) update, **Export** to
+   save a Markdown report, **Remove** to drop it.
+4. Open **Folders & Tags** from the sidebar to group channels, then use the
+   **High-Quality Posts** or **Mutual PR** views for folder-wide analysis.
+
+**Which channels can I analyze?** Any public channel by `@username`, or a
+private one you're a member of by its `-100…` ID or `t.me` link.
+
+## Where data is stored
+
+Config, sessions, checkpoints, caches and logs live in the OS-standard
+per-user locations under an app folder (`TgChannelStat` — the name the
+project started with, kept as-is so existing data keeps working). Open **File → Open
+config folder** to jump straight there.
+
+| Data | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| Config, sessions, checkpoints, folders, tags, mentions, media cache | `~/Library/Application Support/TgChannelStat` | `%APPDATA%\TgChannelStat` | `$XDG_CONFIG_HOME` or `~/.config/TgChannelStat` |
+| Logs | `~/Library/Logs/TgChannelStat` | `%LOCALAPPDATA%\TgChannelStat\logs` | `$XDG_STATE_HOME` or `~/.local/state/tgchannelstat` |
+
+- **`config.json`** — language, theme, accent color, zoom, profiles, and connection fields.
+- **Sessions** (`sessions/`) — Telethon session files (one per profile).
+- **Checkpoints** (`checkpoints/<channel>.json`) — the per-channel fetch
+  results shown in the sidebar. `@Name`, `Name`, and the `-100…` ID all map
+  to the same checkpoint.
+- **`folders.json`** — folder definitions and channel→folder assignments.
+- **`tags.json`** — the loaded tag list, its source `.md` path, and
+  channel→tag assignments.
+- **`mentions.md`** — the Mentions view's `id | names | unclear links`
+  table; unlike `tags.json`'s source file, the app both reads *and writes*
+  this one directly (see app/mentions.py).
+- **`cross_mentions.json`** — the Mutual PR view's Channel links card cache
+  (which tracked channels link to which others — see
+  [Cross-channel mentions](#cross-channel-mentions)), one shared file for
+  the whole tracked base, written whenever its Calculate/Recalculate button
+  runs.
+- **`name_exceptions.txt`** — plain text, one entry per line, of text the
+  Mentions view's NER extraction should never treat as a person name (built
+  in: "Мастер-класс"). Grows via the Names Found table's **Ignore** button;
+  can also be hand-edited (reloaded next time a channel's opened there).
+- **`media/`** — cached post thumbnails downloaded on demand by the
+  High-Quality Posts / dashboard "Fetch media" button.
+- **Logs** rotate at ~2 MB, keeping 5 backups.
+
+## Project layout
+
+```
+main.py                     # entry point: logging, theme, main window
+run_dev.sh / run_dev.bat    # create venv, install deps, launch (macOS·Linux / Windows)
+build.py                    # PyInstaller packaging, invoked by build.sh/build.bat
+build.sh / build.bat        # create venv, install build deps, package a binary
+requirements.txt
+requirements-build.txt      # PyInstaller, only needed to package binaries
+app/
+├── version.py              # app version string (CalVer: YY.M.D)
+├── config.py               # JSON config: profiles + .env import/export
+├── store.py                # per-channel JSON checkpoint store
+├── folders.py              # folder definitions + channel assignments
+├── tags.py                 # tag taxonomy loaded from a Markdown table
+├── mentions.py              # mentions.md store (app-owned, live-edited) + NER extraction
+├── cross_mentions.py       # cross-channel link matching (Mutual PR's Channel links card)
+├── activity.py             # year-over-year channel activity trend
+├── periods.py              # month/season/rolling-year period-key helpers
+├── media_cache.py          # on-disk thumbnail cache paths
+├── scoring.py              # per-post content-quality formula (shared)
+├── rating.py               # composite per-channel-per-period Rating (shared)
+├── scoring_pr.py           # Mutual PR ad-swap forecast heuristics
+├── ad_campaign.py          # Ad Campaign planner: ad-list price, prime-era detection, slot planning
+├── worker.py               # QThread workers: login flows + tool runs
+├── i18n.py                 # English / Russian strings
+├── text_utils.py           # small string helpers
+├── errors.py               # friendly OS-error messages
+├── tools/
+│   ├── channel_stat.py     # the scan: engagement ranking + activity stats
+│   ├── comments_refresh.py # re-read just the comment count for stored posts
+│   ├── mentions_refresh.py # re-read just the links for already-textual stored posts
+│   ├── lean_refresh.py     # incremental re-scan of the months since last fetch
+│   ├── media_fetch.py      # on-demand post-thumbnail download
+│   └── common.py           # entity resolution, FloodWait retries
+└── ui/
+    ├── main_window.py         # sidebar + stacked content views
+    ├── config_view.py         # credentials, profiles, login, fetch form, folder MD export
+    ├── dashboard_view.py      # stat cards, charts, post cards, top-posts table, export
+    ├── compare/
+    │   ├── compare_view.py        # side-by-side stat cards for 2-8 channels
+    │   ├── compare_charts_view.py # overlaid trend charts for up to 8 channels
+    │   └── mentions_view.py       # post-text / mentioned-names comparison for up to 4 + mentions.md editor
+    ├── folder_stat_view.py    # Folders & Tags: hosts the folder/tag cards + periodic stats + Rating
+    ├── content_quality_view.py # High-Quality Posts grid
+    ├── mutual_pr_view.py      # ad-swap follower-gain forecast table
+    ├── ad_campaign_view.py    # Ad Campaign: inputs row, plan tiles, best posts, recommendations, timeline
+    ├── ad_gantt.py            # native QPainter Gantt used by the Ad Campaign view
+    ├── folder_dialog.py       # folder manager dialog
+    ├── side_panel.py          # Config + fetched-channels list, compare modes
+    ├── charts.py              # native QPainter chart widgets
+    ├── qr_login_dialog.py     # QR-code login dialog
+    ├── widgets.py             # shared card widgets (StatCard, PostCard, gauges…)
+    └── theme.py               # QSS stylesheet + palette
+assets/svgs/                # UI icons
+```
+
+## Notes & limitations
+
+- **Folder-level views read stored checkpoints, not fresh Telegram data.**
+  Per-period view/share/reaction totals come from every scanned post and are
+  accurate; the reposts-between-channels table and per-post quality rely on
+  the stored top-N sample, so they're only as complete as the top-N and
+  "include public reposts" choices made when each channel was fetched.
+- **New per-post fields** (`comments`, `media_type`, `has_buttons`, `repost`)
+  are only present on checkpoints fetched after they were added — older
+  checkpoints show 0 comments, a text-only placeholder icon, and no
+  ad-button or repost exclusion until refetched (or, for comments, until
+  "Refresh comments" is run).
+- **Mutual PR forecasts are heuristics, not measurements** — see
+  [scoring_pr.py](#mutual-pr-ad-swap-forecast). Treat the
+  numbers as rough order-of-magnitude guidance.
+- **Private channels typed as bare numeric IDs**: Telethon can only resolve a
+  peer it has an `access_hash` for. If a `-100…` ID isn't found, the app falls
+  back to scanning your dialogs — so being a member of the channel is what
+  makes it resolvable.
+- **Public reposts** require a channel you have statistics access to; where
+  unavailable, that column is simply left blank.
+- This tool only reads data your own account can already see; it does nothing
+  a normal Telegram client couldn't.
+
+
+## Statistical Calculation Methodology
 
 Three modules hold the formulas, kept separate from the views so multiple
 views can share one implementation. Each module's own docstring carries the
@@ -435,7 +677,7 @@ folder's peers** for the same period.
 
 **Reposts are excluded from every term.** A post the channel forwarded in
 from another channel (`repost`, see `_is_repost` in
-[channel_stat.py](#stats--scoring-algorithms)) is dropped from the period's
+[channel_stat.py](#statistical-calculation-methodology)) is dropped from the period's
 `views` / `shares` / `reactions` / `viral_share` / `posts` totals and from
 the quality median — so a channel can't lift its Rating by reposting a
 bigger channel's viral hit. (Channel-level stat cards, ERR%/ERV% and Mutual
@@ -611,6 +853,44 @@ would miss a day ranked #3 for one side but still clearly above its
 average). All weights and constants are ordinary module-level values, meant
 to be retuned.
 
+### Ad campaign planning
+
+`app/ad_campaign.py` (Qt-free; the constants at the top are meant to be
+retuned) has three layers.
+
+**Price** — the reference ad-list formula: a placement costs the channel's
+Mutual PR follower forecast for that period × your price per follower, `+10%`
+for a channel in a folder named `Models`, floored to a round step (10 at the
+default 22). The periods are the forecast's own horizons, so a block's width
+is 1 / 2 / 3 / 7 / 30 days. The rate is flat, so every channel is "fairly"
+priced by construction — which is what the next layer exploits.
+
+**Prime era** — the price is built from lifetime averages, so a channel whose
+audience is spiking *right now* is still sold at its old, cooler price.
+`prime_profile` reads that from the monthly series (own posts, full months
+only): **reach gain** (views per post over the last 3 months ÷ the median of
+the last 18) and **engagement gain** ((shares + 0.05 × reactions) ÷ views,
+same ratio), combined on a log scale (70 / 30) and measured from a typical
+channel's momentum rather than from 1.0 (the median tracked channel sits a
+little below its own median: the latest months are still settling). That is
+a 0–100 score → **prime** (also needs ≥ 2 consecutive months of views per
+post ≥ 1.1× the median — an *era*, not one viral month) / **warming up** /
+**steady** / **cooling**, and a deliberately gentle multiplier (×0.80–×1.25)
+on the forecast. A channel the activity trend already marks slowing/stalling
+is capped at ×1.0 (its forecast already carries a cut); an abandoned one is
+never a candidate. **Timing** adds a per-weekday factor (`best_days`) and a
+per-calendar-month seasonal factor (needs ≥ 2 years of that month), and each
+placement is put on the start day that maximises them.
+
+**Planner** — greedy by *expected followers ÷ price* (× up to +15% for a
+niche match with your channel), until the target plus 10% headroom is covered
+or the budget runs out. No placement takes more than 20% of the budget (which
+is also why small channels get long slots and big ones short slots), at most
+two start on any one day, slots worth fewer than ~10 followers are skipped,
+and slots that would overshoot what's still needed by more than 2× lose to a
+snugger fit. Everything is an estimate on top of the estimates in
+[Mutual PR ad-swap forecast](#mutual-pr-ad-swap-forecast).
+
 ### Cross-channel mentions
 
 `app/cross_mentions.py` backs the Mutual PR view's **Channel links** card:
@@ -760,210 +1040,3 @@ winding-down channel ranks below a live one; a footnote in the export
 spells the penalty out. Pure local computation from the stored checkpoint;
 `channel_activity_trend` is view-agnostic and reusable anywhere a channel's
 monthly series is on hand.
-
-## Requirements
-
-- Python 3.12+ (developed on 3.12)
-- Telegram API credentials — an **API_ID** and **API_HASH** from
-  [my.telegram.org](https://my.telegram.org)
-
-## Installation
-
-Prefer [`run_dev.sh` / `run_dev.bat`](#run-from-source) above — this is the
-manual equivalent if you'd rather manage the environment yourself:
-
-```bash
-# from the project root
-python3 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-python3 main.py                  # Windows: python main.py
-```
-
-Dependencies (`requirements.txt`):
-
-- `PySide6>=6.6` — Qt GUI
-- `telethon>=1.34` — Telegram client
-- `qrcode[pil]>=7.4` — renders the QR-code login image
-- `mawo-slovnet>=1.0.7` — Russian person/location/org NER for the Mentions
-  view (app/mentions.py); downloads its model on first use, then works
-  offline. If it's missing or the download fails, Mentions still shows post
-  texts, just without extracted names (see `extraction_available` in
-  app/mentions.py) — nothing else in the app depends on it. Its main gap is
-  recall on short, casual mentions (a bare first name like "Марина" in a
-  sentence with no surname) — `find_known_names_in_text` (see below and
-  `pymorphy3`) backstops that for names already in `mentions.md`, without
-  pulling in a heavier model. A multilingual BERT model
-  ([Babelscape/wikineural-multilingual-ner](https://huggingface.co/Babelscape/wikineural-multilingual-ner)
-  via `transformers[torch]`) genuinely fixed that recall gap outright when
-  tried — installed and tested side by side, not assumed — but a packaged
-  build went from ~90MB to ~726MB over it, so it was reverted; a rule-based
-  alternative (genuine `natasha`'s `NamesExtractor`) was also tried and
-  reverted after it mistagged ordinary words ("и", "без", "Просто") as
-  names on the same test sentences. DeepPavlov never got that far — its
-  latest release pins `numpy<1.24`, which has no Python 3.12 wheels
-  (confirmed by a failed install, not just its docs).
-- `pymorphy3>=2.0` — Russian morphological analysis, used two ways in
-  app/mentions.py: `MentionsStore.find_row`'s declension-matching tier
-  (mentions.md's "Алиса" matches an extraction of "Алисой"/"Алисы", or
-  "Лина Рязанская" matches "Лину Рязанскую" — an adjectival surname,
-  correctly lemmatized, which a hand-rolled suffix list — kept as the
-  fallback when pymorphy3 isn't installed — can't do), and
-  `find_known_names_in_text`'s plain dictionary-scan fallback mentioned
-  above. Picked over pymorphy2 (and genuine `natasha`, which uses pymorphy2
-  internally) because pymorphy2 imports `pkg_resources`, removed from
-  `setuptools>=81`; pymorphy3 doesn't need that pin.
-
-## Building standalone binaries
-
-`build.sh` / `build.bat` package the app into a standalone binary (no Python
-install required to run it) via [PyInstaller](https://pyinstaller.org/):
-
-```bash
-./build.sh          # macOS / Linux
-build.bat           # Windows
-```
-
-## Getting API credentials
-
-1. Open [my.telegram.org](https://my.telegram.org) and log in with your phone
-   number (Telegram sends the code to your Telegram app).
-2. Click **API development tools**.
-3. Fill in *App title* and *Short name* (any text), platform *Desktop*, then
-   create the application.
-4. Copy **App api_id** → `API_ID` and **App api_hash** → `API_HASH`.
-5. `PHONE_NUMBER` must be in international format, e.g. `+79001234567`.
-
-## Usage
-
-Launch with [`run_dev.sh` / `run_dev.bat`](#run-from-source) (or `python3
-main.py` in an activated venv), then:
-
-1. On the **Config** screen, enter your `API_ID`, `API_HASH` and
-   `PHONE_NUMBER` (or import a `.env`), then authorize — QR code is the quick
-   path.
-2. In **Fetch a channel**, enter a channel by `@username`, `t.me` link, or
-   `-100…` ID, choose how many top posts to keep per metric and the period of
-   analysis, and (optionally) enable public-repost lookup.
-3. Click **Fetch & analyze**. The channel appears in the sidebar with its
-   dashboard; **Refresh** for a lean (incremental) update, **Export** to
-   save a Markdown report, **Remove** to drop it.
-4. Open **Folders & Tags** from the sidebar to group channels, then use the
-   **High-Quality Posts** or **Mutual PR** views for folder-wide analysis.
-
-**Which channels can I analyze?** Any public channel by `@username`, or a
-private one you're a member of by its `-100…` ID or `t.me` link.
-
-## Where data is stored
-
-Config, sessions, checkpoints, caches and logs live in the OS-standard
-per-user locations under an app folder (`TgChannelStat` — the name the
-project started with, kept as-is so existing data keeps working). Open **File → Open
-config folder** to jump straight there.
-
-| Data | macOS | Windows | Linux |
-| --- | --- | --- | --- |
-| Config, sessions, checkpoints, folders, tags, mentions, media cache | `~/Library/Application Support/TgChannelStat` | `%APPDATA%\TgChannelStat` | `$XDG_CONFIG_HOME` or `~/.config/TgChannelStat` |
-| Logs | `~/Library/Logs/TgChannelStat` | `%LOCALAPPDATA%\TgChannelStat\logs` | `$XDG_STATE_HOME` or `~/.local/state/tgchannelstat` |
-
-- **`config.json`** — language, theme, accent color, zoom, profiles, and connection fields.
-- **Sessions** (`sessions/`) — Telethon session files (one per profile).
-- **Checkpoints** (`checkpoints/<channel>.json`) — the per-channel fetch
-  results shown in the sidebar. `@Name`, `Name`, and the `-100…` ID all map
-  to the same checkpoint.
-- **`folders.json`** — folder definitions and channel→folder assignments.
-- **`tags.json`** — the loaded tag list, its source `.md` path, and
-  channel→tag assignments.
-- **`mentions.md`** — the Mentions view's `id | names | unclear links`
-  table; unlike `tags.json`'s source file, the app both reads *and writes*
-  this one directly (see app/mentions.py).
-- **`cross_mentions.json`** — the Mutual PR view's Channel links card cache
-  (which tracked channels link to which others — see
-  [Cross-channel mentions](#cross-channel-mentions)), one shared file for
-  the whole tracked base, written whenever its Calculate/Recalculate button
-  runs.
-- **`name_exceptions.txt`** — plain text, one entry per line, of text the
-  Mentions view's NER extraction should never treat as a person name (built
-  in: "Мастер-класс"). Grows via the Names Found table's **Ignore** button;
-  can also be hand-edited (reloaded next time a channel's opened there).
-- **`media/`** — cached post thumbnails downloaded on demand by the
-  High-Quality Posts / dashboard "Fetch media" button.
-- **Logs** rotate at ~2 MB, keeping 5 backups.
-
-## Project layout
-
-```
-main.py                     # entry point: logging, theme, main window
-run_dev.sh / run_dev.bat    # create venv, install deps, launch (macOS·Linux / Windows)
-build.py                    # PyInstaller packaging, invoked by build.sh/build.bat
-build.sh / build.bat        # create venv, install build deps, package a binary
-requirements.txt
-requirements-build.txt      # PyInstaller, only needed to package binaries
-app/
-├── version.py              # app version string (CalVer: YY.M.D)
-├── config.py               # JSON config: profiles + .env import/export
-├── store.py                # per-channel JSON checkpoint store
-├── folders.py              # folder definitions + channel assignments
-├── tags.py                 # tag taxonomy loaded from a Markdown table
-├── mentions.py              # mentions.md store (app-owned, live-edited) + NER extraction
-├── cross_mentions.py       # cross-channel link matching (Mutual PR's Channel links card)
-├── activity.py             # year-over-year channel activity trend
-├── periods.py              # month/season/rolling-year period-key helpers
-├── media_cache.py          # on-disk thumbnail cache paths
-├── scoring.py              # per-post content-quality formula (shared)
-├── rating.py               # composite per-channel-per-period Rating (shared)
-├── scoring_pr.py           # Mutual PR ad-swap forecast heuristics
-├── worker.py               # QThread workers: login flows + tool runs
-├── i18n.py                 # English / Russian strings
-├── text_utils.py           # small string helpers
-├── errors.py               # friendly OS-error messages
-├── tools/
-│   ├── channel_stat.py     # the scan: engagement ranking + activity stats
-│   ├── comments_refresh.py # re-read just the comment count for stored posts
-│   ├── mentions_refresh.py # re-read just the links for already-textual stored posts
-│   ├── lean_refresh.py     # incremental re-scan of the months since last fetch
-│   ├── media_fetch.py      # on-demand post-thumbnail download
-│   └── common.py           # entity resolution, FloodWait retries
-└── ui/
-    ├── main_window.py         # sidebar + stacked content views
-    ├── config_view.py         # credentials, profiles, login, fetch form, folder MD export
-    ├── dashboard_view.py      # stat cards, charts, post cards, top-posts table, export
-    ├── compare/
-    │   ├── compare_view.py        # side-by-side stat cards for 2-8 channels
-    │   ├── compare_charts_view.py # overlaid trend charts for up to 8 channels
-    │   └── mentions_view.py       # post-text / mentioned-names comparison for up to 4 + mentions.md editor
-    ├── folder_stat_view.py    # Folders & Tags: hosts the folder/tag cards + periodic stats + Rating
-    ├── content_quality_view.py # High-Quality Posts grid
-    ├── mutual_pr_view.py      # ad-swap follower-gain forecast table
-    ├── folder_dialog.py       # folder manager dialog
-    ├── side_panel.py          # Config + fetched-channels list, compare modes
-    ├── charts.py              # native QPainter chart widgets
-    ├── qr_login_dialog.py     # QR-code login dialog
-    ├── widgets.py             # shared card widgets (StatCard, PostCard, gauges…)
-    └── theme.py               # QSS stylesheet + palette
-assets/svgs/                # UI icons
-```
-
-## Notes & limitations
-
-- **Folder-level views read stored checkpoints, not fresh Telegram data.**
-  Per-period view/share/reaction totals come from every scanned post and are
-  accurate; the reposts-between-channels table and per-post quality rely on
-  the stored top-N sample, so they're only as complete as the top-N and
-  "include public reposts" choices made when each channel was fetched.
-- **New per-post fields** (`comments`, `media_type`, `has_buttons`, `repost`)
-  are only present on checkpoints fetched after they were added — older
-  checkpoints show 0 comments, a text-only placeholder icon, and no
-  ad-button or repost exclusion until refetched (or, for comments, until
-  "Refresh comments" is run).
-- **Mutual PR forecasts are heuristics, not measurements** — see
-  [scoring_pr.py](#mutual-pr-ad-swap-forecast). Treat the
-  numbers as rough order-of-magnitude guidance.
-- **Private channels typed as bare numeric IDs**: Telethon can only resolve a
-  peer it has an `access_hash` for. If a `-100…` ID isn't found, the app falls
-  back to scanning your dialogs — so being a member of the channel is what
-  makes it resolvable.
-- **Public reposts** require a channel you have statistics access to; where
-  unavailable, that column is simply left blank.
-- This tool only reads data your own account can already see; it does nothing
-  a normal Telegram client couldn't.

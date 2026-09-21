@@ -392,11 +392,11 @@ def build_qss() -> str:
     QLabel#status {{ color: {c['muted']}; font-size: {fs(12)}px; }}
 
     /* ---------------- inputs ---------------- */
-    QLineEdit, QSpinBox, QComboBox {{
+    QLineEdit, QSpinBox, QDoubleSpinBox, QDateEdit, QComboBox {{
         background: {c['card']}; border: 1px solid {c['line']};
         border-radius: 10px; padding: {sp(7)}px 10px; selection-background-color: {c['accent_soft']};
     }}
-    QLineEdit:focus, QSpinBox:focus, QComboBox:focus {{ border: 1px solid {c['accent']}; }}
+    QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus, QComboBox:focus {{ border: 1px solid {c['accent']}; }}
     QComboBox::drop-down {{ border: none; width: 22px; }}
     QComboBox QAbstractItemView {{
         background: {c['card']}; border: 1px solid {c['line']};

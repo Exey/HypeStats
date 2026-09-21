@@ -14,6 +14,7 @@ from ..folders import FolderStore
 from ..i18n import I18n
 from ..store import ChannelStore
 from ..tags import TagStore
+from .ad_campaign_view import AdCampaignView
 from .compare.compare_charts_view import CompareChartsView
 from .compare.compare_view import CompareView
 from .compare.mentions_view import MentionsView
@@ -63,6 +64,7 @@ class MainWindow(QMainWindow):
         self.side.folder_stat_selected.connect(self._show_folder_stat)
         self.side.content_quality_selected.connect(self._show_content_quality)
         self.side.mutual_pr_selected.connect(self._show_mutual_pr)
+        self.side.ad_campaign_selected.connect(self._show_ad_campaign)
         self.side.channel_selected.connect(self._show_channel)
         self.side.compare_requested.connect(self._show_compare)
         self.side.compare_mode_off.connect(self._on_compare_mode_off)
@@ -121,6 +123,8 @@ class MainWindow(QMainWindow):
         self.mutual_pr = MutualPrView(self.i18n, self.folder_store, self.store,
                                       self.tag_store)
         self.mentions_view = MentionsView(self.i18n)
+        self.ad_campaign = AdCampaignView(self.i18n, self.folder_store, self.store,
+                                          self.tag_store)
         self.stack.addWidget(self.config_view)       # index 0
         self.stack.addWidget(self.dashboard)         # index 1
         self.stack.addWidget(self.compare)           # index 2
@@ -129,6 +133,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.content_quality)   # index 5
         self.stack.addWidget(self.mutual_pr)         # index 6
         self.stack.addWidget(self.mentions_view)     # index 7
+        self.stack.addWidget(self.ad_campaign)       # index 8
         content_col.addWidget(self.stack, 1)
 
         content_wrap = QWidget()
@@ -197,6 +202,7 @@ class MainWindow(QMainWindow):
         self.folder_stat.refresh()
         self.content_quality.refresh()
         self.mutual_pr.refresh()
+        self.ad_campaign.refresh()
 
     def _on_folders_changed(self) -> None:
         # Folder OR tag list/assignments changed, from the Config screen,
@@ -211,6 +217,7 @@ class MainWindow(QMainWindow):
         self.folder_stat.refresh()
         self.content_quality.refresh()
         self.mutual_pr.refresh()
+        self.ad_campaign.refresh()
         if self._current_key:
             self.dashboard.refresh_folder_button()
             self.dashboard.refresh_tag_button()
@@ -248,6 +255,12 @@ class MainWindow(QMainWindow):
         self.side.select_mutual_pr()
         self.mutual_pr.refresh()
         self.stack.setCurrentWidget(self.mutual_pr)
+
+    def _show_ad_campaign(self) -> None:
+        self._current_key = None
+        self.side.select_ad_campaign()
+        self.ad_campaign.refresh()
+        self.stack.setCurrentWidget(self.ad_campaign)
 
     def _show_channel(self, key: str) -> None:
         data = self.store.load(key)
@@ -373,6 +386,7 @@ class MainWindow(QMainWindow):
         self.content_quality.retranslate()
         self.mutual_pr.retranslate()
         self.mentions_view.retranslate()
+        self.ad_campaign.retranslate()
         self.unfold_btn.setToolTip(self.i18n.tr("nav_unfold_hint"))
 
     # --------------------------------------------------------------- theme

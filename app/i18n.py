@@ -663,6 +663,116 @@ EN = {
     "report_reactions": "Top 7 {emoji} Reactions",
     "save_md_button": "💾 Save MD",
     "md_saved": "Saved: {path}",
+    # ad campaign view
+    "nav_mutual_pr_short": "Mutual PR",
+    "nav_ad_campaign": "Ad Campaign",
+    "nav_ad_campaign_hint": "Plan paid ad placements across your tracked "
+                            "channels to hit a follower target.",
+    "ad_title": "Ad Campaign",
+    "ad_sub": "Plan paid placements across your tracked channels to reach a "
+              "follower target — priced by the ad-list formula, timed to each "
+              "channel's prime era.",
+    "ad_hint": "A placement's price is the Mutual PR follower forecast for "
+               "its period × your price per follower (+10% for a channel in "
+               "the Models folder). Expected followers also weigh each "
+               "channel's current audience momentum and best posting days. "
+               "All figures are estimates, not guarantees.",
+    "ad_field_target": "Target followers",
+    "ad_field_period": "Period",
+    "ad_field_budget": "Budget",
+    "ad_field_currency": "Currency",
+    "ad_field_price": "Price for 1 follower",
+    "ad_field_channel": "Your channel (optional)",
+    "ad_channel_placeholder": "ID, @username or t.me link",
+    "ad_period_2w": "2 weeks",
+    "ad_period_1m": "1 month",
+    "ad_period_until": "Until date…",
+    "ad_own_matched": "✓ {title} · {followers} followers",
+    "ad_own_unmatched": "Not among your tracked channels — fetch it on the "
+                        "Config screen to get post and niche recommendations.",
+    "ad_empty": "No channels tracked yet — fetch some from the Config screen "
+                "to have somewhere to advertise.",
+    "ad_tile_spend": "Spend",
+    "ad_tile_spend_sub": "of {budget} budget",
+    "ad_tile_expected": "Expected followers",
+    "ad_tile_expected_sub": "{pct}% of the {target} target",
+    "ad_tile_cpf": "Cost per follower",
+    "ad_tile_cpf_sub": "list price {price}",
+    "ad_tile_slots": "Ad placements",
+    "ad_tile_slots_sub": "{prime} in a prime era",
+    "ad_posts_title": "Best posts to repost",
+    "ad_posts_hint": "Your top {n} posts by Quality — repost them into the "
+                     "channels below, or lift their media for the ad creative. "
+                     "Thumbnails appear once fetched in High-Quality Posts.",
+    "ad_posts_empty": "This channel has no scored posts yet (ad-button posts "
+                      "and reposts don't count).",
+    "ad_post_rank": "#{n} · Quality {gauge}/1000",
+    "ad_post_tip_media": "reuse its media as the ad creative",
+    "ad_post_tip_text": "repost it as is",
+    "ad_recs_title": "How to reach the target",
+    "ad_rec_cost_check": "At {price} per follower, {target} followers cost "
+                         "{cost}; your {budget} budget buys ≈ {affordable} "
+                         "followers at list price.",
+    "ad_rec_pacing": "That is ≈ {per_day} new followers a day over {days} "
+                     "days.",
+    "ad_rec_no_slots": "⚠️ No affordable placement fits this budget and "
+                       "period — raise the budget, lengthen the period or "
+                       "fetch more channels.",
+    "ad_rec_target_met": "✅ The plan expects ≈ {expected} new followers "
+                         "({safety}% headroom over the target) for {spend}; "
+                         "{reserve} stays in reserve.",
+    "ad_rec_target_short": "⚠️ The budget covers ≈ {expected} followers "
+                           "({pct}% of the target). Reaching it takes ≈ "
+                           "{need_budget} (+{extra_budget}) at ≈ {cpf} per "
+                           "follower — or lower the target, or lengthen the "
+                           "period.",
+    "ad_rec_prime_top": "🔥 {count} of {total} placements sit in a channel's "
+                        "prime era (reach per post above its norm): {names}. "
+                        "They are still sold at their old, cooler price.",
+    "ad_rec_prime_item": "{label} ({gain} reach per post)",
+    "ad_rec_prime_item_since": "{label} ({gain} reach per post, hot since {since})",
+    "ad_rec_no_prime": "None of the {total} placements is in a prime era "
+                       "right now — the picks are simply the best-value "
+                       "channels.",
+    "ad_rec_timing": "🗓 The first ad goes live on {first} in {first_label}; "
+                     "the last one ends on {last_end}. Each is placed on its "
+                     "channel's best day (when it posts least itself).",
+    "ad_rec_excluded": "🚫 {count} channel(s) excluded as not selling ads — "
+                       "replaced by the next best.",
+    "ad_rec_swap": "🤝 Similar in size to your channel — try a free ad swap "
+                   "with {names} instead of paying (see Mutual PR).",
+    "ad_rec_own_missing": "💡 Enter your channel to get your 3 best posts to "
+                          "repost and prefer channels in your niche.",
+    "ad_gantt_title": "Ad timeline",
+    "ad_gantt_hint": "Block width is the placement period. Click a block to "
+                     "replace its channel — some channels don't sell ads.",
+    "ad_gantt_empty": "No placements to show — adjust the target, budget or "
+                      "period.",
+    "ad_excluded_reset": "Excluded: {count} — reset",
+    "ad_legend_title": "Channel momentum:",
+    "ad_state_prime": "Prime era",
+    "ad_state_warm": "Warming up",
+    "ad_state_steady": "Steady",
+    "ad_state_cooling": "Cooling",
+    "ad_state_unknown": "No data",
+    "ad_period_24h": "24 h",
+    "ad_period_48h": "48 h",
+    "ad_period_72h": "72 h",
+    "ad_period_week": "1 week",
+    "ad_period_month": "1 month",
+    "ad_menu_replace": "Replace {label} with…",
+    "ad_menu_none": "No alternatives within budget",
+    "ad_menu_alt": "{label} · {price} · +{expected} · {state}",
+    "ad_menu_no_ads": "Doesn't sell ads — replace and exclude",
+    "ad_menu_remove": "Remove this ad",
+    "ad_tip_head": "{label} · {followers} followers",
+    "ad_tip_slot": "{period}: {start} – {end}",
+    "ad_tip_price": "Price {price} (forecast +{base} × {ppf}{markup})",
+    "ad_tip_markup": ", Models +10%",
+    "ad_tip_expected": "Expected ≈ +{expected} followers · {state} {score}/100",
+    "ad_tip_pulse": "Last {recent} months vs its {window}-month median: reach per post {reach}, engagement {eng}{era}",
+    "ad_tip_pulse_unknown": "Not enough monthly history to read its momentum.",
+    "ad_tip_era": " · hot since {since} ({months} mo)",
 }
 
 RU = {
@@ -1323,6 +1433,119 @@ RU = {
     "report_reactions": "Топ 7 {emoji} Реакций",
     "save_md_button": "💾 Сохранить MD",
     "md_saved": "Сохранено: {path}",
+    # ad campaign view
+    "nav_mutual_pr_short": "Взаимопиар",
+    "nav_ad_campaign": "Реклама",
+    "nav_ad_campaign_hint": "Рекламная кампания: спланировать платные "
+                            "размещения в отслеживаемых каналах под цель по "
+                            "подписчикам.",
+    "ad_title": "Рекламная кампания",
+    "ad_sub": "Планирование платных размещений в отслеживаемых каналах под "
+              "цель по подписчикам — цена по формуле рекламного прайса, "
+              "время — в «горячую» пору каждого канала.",
+    "ad_hint": "Цена размещения — прогноз прироста из Взаимопиара за период × "
+               "ваша цена за подписчика (+10% у каналов в папке Models). "
+               "Ожидаемый прирост дополнительно учитывает текущий разгон "
+               "аудитории канала и его лучшие дни. Все цифры — оценки, а не "
+               "гарантии.",
+    "ad_field_target": "Цель по подписчикам",
+    "ad_field_period": "Период",
+    "ad_field_budget": "Бюджет",
+    "ad_field_currency": "Валюта",
+    "ad_field_price": "Цена за 1 подписчика",
+    "ad_field_channel": "Ваш канал (необязательно)",
+    "ad_channel_placeholder": "ID, @username или ссылка t.me",
+    "ad_period_2w": "2 недели",
+    "ad_period_1m": "1 месяц",
+    "ad_period_until": "До даты…",
+    "ad_own_matched": "✓ {title} · {followers} подписчиков",
+    "ad_own_unmatched": "Нет среди отслеживаемых каналов — соберите его на "
+                        "экране Config, чтобы получить рекомендации по постам "
+                        "и нише.",
+    "ad_empty": "Пока нет отслеживаемых каналов — соберите несколько на "
+                "экране Config, чтобы было где рекламироваться.",
+    "ad_tile_spend": "Расходы",
+    "ad_tile_spend_sub": "из бюджета {budget}",
+    "ad_tile_expected": "Ожидаемый прирост",
+    "ad_tile_expected_sub": "{pct}% от цели {target}",
+    "ad_tile_cpf": "Цена подписчика",
+    "ad_tile_cpf_sub": "по прайсу {price}",
+    "ad_tile_slots": "Размещений",
+    "ad_tile_slots_sub": "в «горячую» пору: {prime}",
+    "ad_posts_title": "Лучшие посты для репоста",
+    "ad_posts_hint": "Ваши {n} лучших поста по Качеству — репостите их в "
+                     "каналы ниже или берите из них медиа для креатива. "
+                     "Превью появятся после загрузки в «Качественных "
+                     "постах».",
+    "ad_posts_empty": "В этом канале пока нет оценённых постов (посты с "
+                      "кнопкой и репосты не учитываются).",
+    "ad_post_rank": "№{n} · Качество {gauge}/1000",
+    "ad_post_tip_media": "возьмите его медиа для рекламного креатива",
+    "ad_post_tip_text": "репостите как есть",
+    "ad_recs_title": "Как достичь цели",
+    "ad_rec_cost_check": "По {price} за подписчика {target} подписчиков "
+                         "стоят {cost}; на ваш бюджет {budget} по прайсу "
+                         "можно получить ≈ {affordable}.",
+    "ad_rec_pacing": "Это ≈ {per_day} новых подписчиков в день за {days} дн.",
+    "ad_rec_no_slots": "⚠️ Под этот бюджет и период нет доступных "
+                       "размещений — увеличьте бюджет, удлините период или "
+                       "соберите больше каналов.",
+    "ad_rec_target_met": "✅ План даёт ≈ {expected} новых подписчиков "
+                         "(запас {safety}% сверх цели) за {spend}; в резерве "
+                         "остаётся {reserve}.",
+    "ad_rec_target_short": "⚠️ Бюджета хватает на ≈ {expected} подписчиков "
+                           "({pct}% цели). Чтобы дойти до цели, нужно ≈ "
+                           "{need_budget} (+{extra_budget}) по ≈ {cpf} за "
+                           "подписчика — или снизьте цель, или удлините "
+                           "период.",
+    "ad_rec_prime_top": "🔥 {count} из {total} размещений — в «горячую» пору "
+                        "канала (охват поста выше обычного): {names}. Их "
+                        "по-прежнему продают по старой, более низкой цене.",
+    "ad_rec_prime_item": "{label} ({gain} охвата поста)",
+    "ad_rec_prime_item_since": "{label} ({gain} охвата поста, в ударе с {since})",
+    "ad_rec_no_prime": "Ни одно из {total} размещений сейчас не попадает в "
+                       "«горячую» пору — выбраны просто самые выгодные "
+                       "каналы.",
+    "ad_rec_timing": "🗓 Первая реклама выходит {first} в {first_label}, "
+                     "последняя заканчивается {last_end}. Каждая стоит в "
+                     "лучший день канала (когда он сам публикует меньше "
+                     "всего).",
+    "ad_rec_excluded": "🚫 Каналов, исключённых как не продающих рекламу: "
+                       "{count} — заменены следующими по выгоде.",
+    "ad_rec_swap": "🤝 По размеру близки к вашему каналу — вместо оплаты "
+                   "попробуйте бесплатный взаимопиар с {names} (см. "
+                   "Взаимопиар).",
+    "ad_rec_own_missing": "💡 Укажите свой канал — получите 3 лучших поста "
+                          "для репоста и предпочтение каналам вашей ниши.",
+    "ad_gantt_title": "График рекламы",
+    "ad_gantt_hint": "Ширина блока — период размещения. Нажмите на блок, "
+                     "чтобы заменить канал — не все каналы продают рекламу.",
+    "ad_gantt_empty": "Нечего показать — измените цель, бюджет или период.",
+    "ad_excluded_reset": "Исключено: {count} — сбросить",
+    "ad_legend_title": "Динамика канала:",
+    "ad_state_prime": "Горячая пора",
+    "ad_state_warm": "Набирает ход",
+    "ad_state_steady": "Ровно",
+    "ad_state_cooling": "Остывает",
+    "ad_state_unknown": "Нет данных",
+    "ad_period_24h": "24 ч",
+    "ad_period_48h": "48 ч",
+    "ad_period_72h": "72 ч",
+    "ad_period_week": "Неделя",
+    "ad_period_month": "Месяц",
+    "ad_menu_replace": "Заменить {label} на…",
+    "ad_menu_none": "Нет замен в рамках бюджета",
+    "ad_menu_alt": "{label} · {price} · +{expected} · {state}",
+    "ad_menu_no_ads": "Не продаёт рекламу — заменить и исключить",
+    "ad_menu_remove": "Убрать эту рекламу",
+    "ad_tip_head": "{label} · {followers} подписчиков",
+    "ad_tip_slot": "{period}: {start} – {end}",
+    "ad_tip_price": "Цена {price} (прогноз +{base} × {ppf}{markup})",
+    "ad_tip_markup": ", Models +10%",
+    "ad_tip_expected": "Ожидается ≈ +{expected} подписчиков · {state} {score}/100",
+    "ad_tip_pulse": "Последние {recent} мес. к медиане за {window} мес.: охват поста {reach}, вовлечённость {eng}{era}",
+    "ad_tip_pulse_unknown": "Мало помесячной истории, чтобы оценить разгон.",
+    "ad_tip_era": " · в ударе с {since} ({months} мес.)",
 }
 
 LANGS = {"en": EN, "ru": RU}

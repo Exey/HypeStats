@@ -21,7 +21,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import QGraphicsDropShadowEffect
+from PySide6.QtWidgets import QGraphicsDropShadowEffect, QTableWidget
 
 ASSETS = Path(__file__).resolve().parent.parent.parent / "assets"
 SVGS = ASSETS / "svgs"
@@ -245,6 +245,35 @@ def fs(size: float) -> int:
     return max(6, round(size + (title if size >= TITLE_MIN_SIZE else regular)))
 
 
+# Row/padding density per zoom level: Small also tightens row heights and
+# vertical padding (a 12 px font in a 46 px sidebar row looks lost), Large
+# keeps the spacing it has and lets the bigger text fill it.
+_DENSITY = {"small": 0.7, "standard": 1.0, "large": 1.0}
+
+
+def sp(px: float) -> int:
+    """`px` of row height / vertical padding at the current zoom (see
+    _DENSITY) -- what the sidebar rows, table rows, buttons and inputs
+    use so Small zoom shrinks the *rows*, not just the text in them."""
+    return round(px * _DENSITY.get(_zoom, 1.0))
+
+
+# A table's row height is max(its header's default section size, the item's
+# own height) -- so the QSS padding scaling above alone can't shrink a row
+# below Qt's stock 30 px. Every QTableWidget here is built in Python, so
+# wrap its constructor once to give Small zoom a tighter default row.
+_table_init = QTableWidget.__init__
+
+
+def _dense_table_init(self, *args, **kwargs) -> None:
+    _table_init(self, *args, **kwargs)
+    if _zoom == "small":
+        self.verticalHeader().setDefaultSectionSize(sp(30))
+
+
+QTableWidget.__init__ = _dense_table_init
+
+
 def zoom_extra(step: float) -> int:
     """`step` px of extra room per positive font-size step of the current
     zoom (0 at Standard/Small) -- for fixed-size boxes that text now grows
@@ -332,18 +361,18 @@ def build_qss() -> str:
     QLabel#brandDot {{ color: {c['accent']}; }}
     QLabel#sectionLabel {{
         color: {c['faint']}; font-size: {fs(11)}px; font-weight: 700;
-        letter-spacing: 1px; padding: 4px 8px;
+        letter-spacing: 1px; padding: {sp(4)}px 8px;
     }}
     QPushButton#navBtn {{
         text-align: left; border: none; border-radius: 12px;
-        padding: 10px 12px; font-size: {fs(14)}px; font-weight: 600;
+        padding: {sp(10)}px 12px; font-size: {fs(14)}px; font-weight: 600;
         color: {c['muted']}; background: transparent;
     }}
     QPushButton#navBtn:hover {{ background: {c['bg']}; }}
     QPushButton#navBtn:checked {{
         background: {c['accent_soft']}; color: {c['accent']}; font-weight: 700;
     }}
-    QLabel#navEmpty {{ color: {c['faint']}; font-size: {fs(12)}px; padding: 6px 10px; }}
+    QLabel#navEmpty {{ color: {c['faint']}; font-size: {fs(12)}px; padding: {sp(6)}px 10px; }}
     QLabel#navMeta {{ color: {c['faint']}; font-size: {fs(11)}px; font-weight: 700; }}
 
     /* ---------------- cards ---------------- */
@@ -365,7 +394,7 @@ def build_qss() -> str:
     /* ---------------- inputs ---------------- */
     QLineEdit, QSpinBox, QComboBox {{
         background: {c['card']}; border: 1px solid {c['line']};
-        border-radius: 10px; padding: 7px 10px; selection-background-color: {c['accent_soft']};
+        border-radius: 10px; padding: {sp(7)}px 10px; selection-background-color: {c['accent_soft']};
     }}
     QLineEdit:focus, QSpinBox:focus, QComboBox:focus {{ border: 1px solid {c['accent']}; }}
     QComboBox::drop-down {{ border: none; width: 22px; }}
@@ -378,7 +407,7 @@ def build_qss() -> str:
     /* ---------------- buttons ---------------- */
     QPushButton {{
         background: {c['card']}; border: 1px solid {c['line']};
-        border-radius: 10px; padding: 8px 14px; font-weight: 600; color: {c['text']};
+        border-radius: 10px; padding: {sp(8)}px 14px; font-weight: 600; color: {c['text']};
     }}
     QPushButton:hover {{ background: {c['bg']}; }}
     QPushButton:disabled {{ color: {c['faint']}; }}
@@ -402,17 +431,17 @@ def build_qss() -> str:
     }}
     QHeaderView::section {{
         background: {c['card']}; color: {c['muted']}; border: none;
-        border-bottom: 1px solid {c['line']}; padding: 8px 6px;
+        border-bottom: 1px solid {c['line']}; padding: {sp(8)}px 6px;
         font-weight: 700; font-size: {fs(12)}px;
     }}
-    QTableWidget::item {{ padding: 6px; border-bottom: 1px solid {c['line']}; }}
+    QTableWidget::item {{ padding: {sp(6)}px; border-bottom: 1px solid {c['line']}; }}
 
     /* Mentions view's per-column "Summary" stats table -- deliberately as
        quiet as the "hint"-styled Posts/Names Found lines above it, not a
        full-size data table, since it's a plain key/value recap. */
     QTableWidget#statsTable {{ font-size: {fs(12)}px; }}
     QTableWidget#statsTable::item {{
-        padding: 3px 6px; border-bottom: none; color: {c['muted']};
+        padding: {sp(3)}px 6px; border-bottom: none; color: {c['muted']};
     }}
 
     /* Mentions view's per-column post-texts/names-found tables -- same
@@ -421,7 +450,7 @@ def build_qss() -> str:
        divider since, unlike Summary, these are genuine sortable data
        tables, not a quiet key/value recap. */
     QTableWidget#mentionsColumnTable {{ font-size: {fs(12)}px; }}
-    QTableWidget#mentionsColumnTable::item {{ padding: 4px 6px; }}
+    QTableWidget#mentionsColumnTable::item {{ padding: {sp(4)}px 6px; }}
 
     QProgressBar {{
         background: {c['bg']}; border: none; border-radius: 6px;

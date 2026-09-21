@@ -1,4 +1,4 @@
-"""TG Channel Stat — entry point.
+"""HypeStats — entry point.
 
 Configures logging (console + rotating file in the OS-appropriate location),
 applies the theme stylesheet, and shows the main window.
@@ -14,6 +14,9 @@ from pathlib import Path
 from app.errors import friendly_os_error
 from app.version import __version__
 
+# Folder name for the log/config/data dirs -- still the project's original
+# name on purpose: renaming it would orphan every existing install's
+# checkpoints, session and settings (see app.config.APP_NAME).
 APP_NAME = "TgChannelStat"
 
 
@@ -76,7 +79,7 @@ def main() -> int:
     from app.ui.main_window import MainWindow
 
     app = QApplication.instance() or QApplication(sys.argv)
-    app.setApplicationName("TG Channel Stat")
+    app.setApplicationName("HypeStats")
     app.setApplicationVersion(__version__)
     app.setOrganizationName(APP_NAME)
 

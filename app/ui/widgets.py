@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from ..mentions import tg_deep_link
 from ..scoring import GAUGE_MAX
 from .charts import GaugeDial, Sparkline
-from .theme import COLORS, add_shadow, fs, svg_pixmap, zoom_extra
+from .theme import COLORS, add_shadow, fs, sp, svg_pixmap, zoom_extra
 
 
 def open_external_link(url: str) -> None:
@@ -432,7 +432,7 @@ class NavButton(QPushButton):
         self._meta.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         lay.addWidget(self._meta)
 
-        self.setMinimumHeight(46)
+        self.setMinimumHeight(sp(46))
         self.toggled.connect(self._sync_icon)
         self._sync_icon(False)
 

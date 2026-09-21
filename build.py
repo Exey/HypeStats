@@ -6,13 +6,13 @@ to produce that OS's binary:
     macOS / Linux:  ./build.sh     (or: python3 build.py)
     Windows:        build.bat      (or: python build.py)
 
-Output (name: tg-channel-stats_<version, dots as underscores>):
-  - macOS:    dist/tg-channel-stats_26_7_30.app
+Output (name: hypestats_<version, dots as underscores>):
+  - macOS:    dist/hypestats_26_7_30.app
               (a proper .app bundle — PyInstaller deprecates --onefile +
               --windowed together on macOS, since a .app can't be a single
               file anyway, so this uses --onedir there instead)
-  - Windows:  dist/tg-channel-stats_26_7_30.exe — single file (--onefile)
-  - Linux:    dist/tg-channel-stats_26_7_30 — single file (--onefile)
+  - Windows:  dist/hypestats_26_7_30.exe — single file (--onefile)
+  - Linux:    dist/hypestats_26_7_30 — single file (--onefile)
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ _ICON_BY_PLATFORM = {"darwin": ASSETS / "icon.icns", "win32": ASSETS / "icon.ico
 
 
 def main() -> None:
-    dist_name = f"tg-channel-stats_{__version__.replace('.', '_')}"
+    dist_name = f"hypestats_{__version__.replace('.', '_')}"
 
     args = [
         str(ROOT / "main.py"),

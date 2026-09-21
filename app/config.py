@@ -11,6 +11,8 @@ import os
 import sys
 from pathlib import Path
 
+# Kept as the project's original name on purpose -- it names the per-user data
+# folder, and changing it would orphan existing checkpoints/sessions/settings.
 APP_NAME = "TgChannelStat"
 
 # Every field a profile stores (also drives .env import/export).

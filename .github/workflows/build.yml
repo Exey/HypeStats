@@ -63,14 +63,14 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           cd dist
-          app=$(ls -d tg-channel-stats_*.app)
+          app=$(ls -d hypestats_*.app)
           ditto -c -k --keepParent "$app" "${app%.app}_macos.zip"
           rm -rf "$app" "${app%.app}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tg-channel-stats-${{ matrix.artifact_name }}
+          name: hypestats-${{ matrix.artifact_name }}
           path: |
-            dist/tg-channel-stats_*
-            !dist/tg-channel-stats_*.app
+            dist/hypestats_*
+            !dist/hypestats_*.app

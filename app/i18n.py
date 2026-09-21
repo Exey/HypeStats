@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 EN = {
-    "app_title": "TG Channel Stats",
+    "app_title": "HypeStats",
     # nav / sidebar
     "nav_config": "⚙️ Config",
     "nav_no_channels": "No channels yet — fetch one from the Config screen.",
@@ -666,7 +666,7 @@ EN = {
 }
 
 RU = {
-    "app_title": "TG Channel Stats",
+    "app_title": "HypeStats",
     "nav_config": "⚙️ Настройки",
     "nav_no_channels": "Пока нет каналов — загрузите канал на экране «Настройки».",
     "nav_compare": "Метрики",

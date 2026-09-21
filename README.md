@@ -1,6 +1,6 @@
-# TG Channel Stats
+# HypeStats — Telegram Channel Analytics
 
-A cross-platform desktop app for analyzing Telegram channels. Point it at any
+HypeStats is a cross-platform desktop app for analyzing Telegram channels. Point it at any
 public channel (or a private one you're a member of), pick a period, and it
 scans every post to rank the top performers **and** compute activity
 analytics. Track many channels side by side, organize them into folders and
@@ -25,7 +25,7 @@ Re-run the same script any time to start the app; it only reinstalls if
 `requirements.txt` changed. See [Installation](#installation) for the manual
 equivalent.
 
-![tgchanstat.png](https://i.postimg.cc/MWnhLs56/tgchanstat.png)
+![HypeStats](https://i.postimg.cc/MWnhLs56/tgchanstat.png)
 
 ## What it does
 
@@ -351,7 +351,8 @@ the main forecast table intact and appends just the MPR Pairs table
   theme to stay readable (a neon lime on white, a deep crimson on black) with
   the primary-button text flipping to dark on a light accent. **Interface
   size** zooms every font: *Small* is −2 pt on all text and −3 on big titles
-  (page titles, stat values, the brand), *Large* is +2 pt on all text and +1 on
+  (page titles, stat values, the brand) and also tightens row heights and
+  vertical padding (sidebar rows, table rows, buttons, inputs), *Large* is +2 pt on all text and +1 on
   titles, *Standard* is unchanged (`theme.fs`; the sidebar and post cards
   widen/heighten a little at Large so text isn't clipped). All three are
   stored in `config.json`.
@@ -856,7 +857,8 @@ private one you're a member of by its `-100…` ID or `t.me` link.
 ## Where data is stored
 
 Config, sessions, checkpoints, caches and logs live in the OS-standard
-per-user locations under an app folder (`TgChannelStat`). Open **File → Open
+per-user locations under an app folder (`TgChannelStat` — the name the
+project started with, kept as-is so existing data keeps working). Open **File → Open
 config folder** to jump straight there.
 
 | Data | macOS | Windows | Linux |

@@ -21,7 +21,7 @@ from .compare.compare_view import MAX_COMPARE
 from .compare.mentions_view import MAX_MENTIONS_COMPARE
 from .dashboard_view import short_num
 from .folder_dialog import FolderManagerDialog
-from .theme import COLORS, fs, zoom_extra
+from .theme import COLORS, fs, sp, zoom_extra
 from .widgets import NavButton, folder_icon, hline
 
 _FOLDER_BADGE_LEN = 2
@@ -111,14 +111,14 @@ class SidePanel(QFrame):
             return holder
 
         self.config_btn = NavButton(None, i18n.tr("nav_config"))
-        self.config_btn.setMinimumHeight(36)
-        self.config_btn.setStyleSheet("padding: 4px 0px; border: none;")
+        self.config_btn.setMinimumHeight(sp(36))
+        self.config_btn.setStyleSheet(f"padding: {sp(4)}px 0px; border: none;")
         self.config_btn.clicked.connect(lambda: self.config_selected.emit())
         self.group.addButton(self.config_btn)
         self.lang_btn = QPushButton(i18n.lang.upper())
         self.lang_btn.setObjectName("ghost")
         self.lang_btn.setMinimumWidth(36)
-        self.lang_btn.setStyleSheet("padding: 4px 12px; border: none;")
+        self.lang_btn.setStyleSheet(f"padding: {sp(4)}px 12px; border: none;")
         self.lang_btn.setToolTip(i18n.tr("nav_lang_hint"))
         self.lang_btn.clicked.connect(lambda: self.language_toggle_requested.emit())
         root.addWidget(_bordered(self.config_btn, self.lang_btn))
@@ -128,24 +128,24 @@ class SidePanel(QFrame):
         # a second SVG icon column would be redundant — left-aligned via
         # #navBtn's QSS the same as every other nav entry.
         self.folder_stat_btn = NavButton(None, i18n.tr("nav_folder_stat"))
-        self.folder_stat_btn.setMinimumHeight(36)
-        self.folder_stat_btn.setStyleSheet("padding: 4px 0px; border: none;")
+        self.folder_stat_btn.setMinimumHeight(sp(36))
+        self.folder_stat_btn.setStyleSheet(f"padding: {sp(4)}px 0px; border: none;")
         self.folder_stat_btn.clicked.connect(lambda: self.folder_stat_selected.emit())
         self.group.addButton(self.folder_stat_btn)
         root.addWidget(_bordered(self.folder_stat_btn))
         root.addSpacing(4)
 
         self.content_quality_btn = NavButton(None, i18n.tr("nav_content_quality"))
-        self.content_quality_btn.setMinimumHeight(36)
-        self.content_quality_btn.setStyleSheet("padding: 4px 0px; border: none;")
+        self.content_quality_btn.setMinimumHeight(sp(36))
+        self.content_quality_btn.setStyleSheet(f"padding: {sp(4)}px 0px; border: none;")
         self.content_quality_btn.clicked.connect(lambda: self.content_quality_selected.emit())
         self.group.addButton(self.content_quality_btn)
         root.addWidget(_bordered(self.content_quality_btn))
         root.addSpacing(4)
 
         self.mutual_pr_btn = NavButton(None, i18n.tr("nav_mutual_pr"))
-        self.mutual_pr_btn.setMinimumHeight(36)
-        self.mutual_pr_btn.setStyleSheet("padding: 4px 0px; border: none;")
+        self.mutual_pr_btn.setMinimumHeight(sp(36))
+        self.mutual_pr_btn.setStyleSheet(f"padding: {sp(4)}px 0px; border: none;")
         self.mutual_pr_btn.clicked.connect(lambda: self.mutual_pr_selected.emit())
         self.group.addButton(self.mutual_pr_btn)
         root.addWidget(_bordered(self.mutual_pr_btn))
@@ -163,7 +163,7 @@ class SidePanel(QFrame):
         self.compare_charts_btn = QPushButton(i18n.tr("nav_compare_charts"))
         self.compare_charts_btn.setObjectName("ghost")
         self.compare_charts_btn.setCheckable(True)
-        self.compare_charts_btn.setStyleSheet(f"padding: 4px 8px; font-size: {fs(13)}px;")
+        self.compare_charts_btn.setStyleSheet(f"padding: {sp(4)}px 8px; font-size: {fs(13)}px;")
         self.compare_charts_btn.setToolTip(i18n.tr("nav_compare_charts_hint"))
         self.compare_charts_btn.toggled.connect(self._toggle_compare_charts_mode)
         compare_row.addWidget(self.compare_charts_btn, 1)
@@ -171,7 +171,7 @@ class SidePanel(QFrame):
         self.compare_btn = QPushButton(i18n.tr("nav_compare"))
         self.compare_btn.setObjectName("ghost")
         self.compare_btn.setCheckable(True)
-        self.compare_btn.setStyleSheet(f"padding: 4px 8px; font-size: {fs(13)}px;")
+        self.compare_btn.setStyleSheet(f"padding: {sp(4)}px 8px; font-size: {fs(13)}px;")
         self.compare_btn.setToolTip(i18n.tr("nav_compare_hint"))
         self.compare_btn.toggled.connect(self._toggle_compare_mode)
         compare_row.addWidget(self.compare_btn, 1)
@@ -179,7 +179,7 @@ class SidePanel(QFrame):
         self.mentions_btn = QPushButton(i18n.tr("nav_mentions"))
         self.mentions_btn.setObjectName("ghost")
         self.mentions_btn.setCheckable(True)
-        self.mentions_btn.setStyleSheet(f"padding: 4px 8px; font-size: {fs(13)}px;")
+        self.mentions_btn.setStyleSheet(f"padding: {sp(4)}px 8px; font-size: {fs(13)}px;")
         self.mentions_btn.setToolTip(i18n.tr("nav_mentions_hint"))
         self.mentions_btn.toggled.connect(self._toggle_compare_mentions_mode)
         compare_row.addWidget(self.mentions_btn, 1)
@@ -193,7 +193,7 @@ class SidePanel(QFrame):
         self.sort_folders_btn = QPushButton(i18n.tr("nav_sort_folders"))
         self.sort_folders_btn.setObjectName("ghost")
         self.sort_folders_btn.setCheckable(True)
-        self.sort_folders_btn.setStyleSheet("padding: 4px 12px;")
+        self.sort_folders_btn.setStyleSheet(f"padding: {sp(4)}px 12px;")
         self.sort_folders_btn.setToolTip(i18n.tr("nav_sort_folders_hint"))
         self.sort_folders_btn.toggled.connect(self._on_sort_folders_toggled)
         root.addWidget(self.sort_folders_btn)
@@ -207,8 +207,8 @@ class SidePanel(QFrame):
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         holder = QWidget()
         self.list_lay = QVBoxLayout(holder)
-        self.list_lay.setContentsMargins(0, 6, 0, 6)
-        self.list_lay.setSpacing(4)
+        self.list_lay.setContentsMargins(0, sp(6), 0, sp(6))
+        self.list_lay.setSpacing(sp(4))
         self.empty_lbl = QLabel(i18n.tr("nav_no_channels"))
         self.empty_lbl.setObjectName("navEmpty")
         self.empty_lbl.setWordWrap(True)

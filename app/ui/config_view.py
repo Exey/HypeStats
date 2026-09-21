@@ -13,9 +13,9 @@ from pathlib import Path
 from statistics import median
 
 from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox,
+    QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QFileDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMessageBox,
     QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
@@ -41,10 +41,11 @@ from ..worker import CheckLoginWorker, ToolWorker
 from .dashboard_view import fmt_int
 from .folder_dialog import FolderManagerDialog
 from .qr_login_dialog import QrLoginDialog
+from .theme import ACCENT_PRESETS, COLORS, ZOOM_LEVELS, default_accent, fs
 from .widgets import Card, SectionCard
 
 PERIOD_KEYS = ["2y", "3y", "all"]
-_THEME_PREFS = ["system", "light", "dark"]
+_THEME_PREFS = ["system", "light", "dark", "black"]
 
 
 def _channel_display_name(ch: dict) -> str:
@@ -58,7 +59,9 @@ class ConfigView(QWidget):
     tags_changed = Signal()
     checkpoints_changed = Signal()   # a folder's checkpoints were updated in place
     worker_started = Signal()        # a background job began — bring this screen up
-    theme_change_requested = Signal(str)  # "system" | "light" | "dark"
+    theme_change_requested = Signal(str)  # "system" | "light" | "dark" | "black"
+    zoom_change_requested = Signal(str)   # "small" | "standard" | "large"
+    accent_change_requested = Signal(str)  # "" (theme default) | "#RRGGBB"
 
     def __init__(self, cfg, i18n, folder_store: FolderStore, tag_store: TagStore,
                 channel_store: ChannelStore, parent=None) -> None:
@@ -189,6 +192,39 @@ class ConfigView(QWidget):
         theme_row.addWidget(self.theme_combo, 1)
         card.body.addLayout(theme_row)
 
+        zoom_row = QHBoxLayout()
+        self.zoom_lbl = QLabel(self.tr_("zoom_label"))
+        zoom_row.addWidget(self.zoom_lbl)
+        self.zoom_combo = QComboBox()
+        self.zoom_combo.addItems([self.tr_(f"zoom_{z}") for z in ZOOM_LEVELS])
+        self.sync_zoom_combo()
+        self.zoom_combo.currentIndexChanged.connect(self._on_zoom_combo_changed)
+        zoom_row.addWidget(self.zoom_combo, 1)
+        card.body.addLayout(zoom_row)
+
+        # Accent colour, Telegram-style: a row of round swatches (the
+        # reference themes' accents, see theme.ACCENT_PRESETS) plus the
+        # theme's own default and a custom picker — applies to every theme.
+        accent_row = QHBoxLayout()
+        self.accent_lbl = QLabel(self.tr_("accent_label"))
+        accent_row.addWidget(self.accent_lbl)
+        accent_row.addSpacing(8)
+        self.accent_swatches: list[tuple[str, QPushButton]] = []
+        choices = [("", self.tr_("accent_default"), default_accent())]
+        choices += [(hex_, name, hex_) for hex_, name in ACCENT_PRESETS]
+        for value, name, shown in choices:
+            btn = self._accent_swatch(value, name, shown)
+            accent_row.addWidget(btn)
+        self.accent_custom_btn = QPushButton("+")
+        self.accent_custom_btn.setFixedSize(24, 24)
+        self.accent_custom_btn.setToolTip(self.tr_("accent_custom"))
+        self.accent_custom_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.accent_custom_btn.clicked.connect(self._on_accent_custom_clicked)
+        accent_row.addWidget(self.accent_custom_btn)
+        accent_row.addStretch(1)
+        card.body.addLayout(accent_row)
+        self.sync_accent_swatches()
+
         loc_row = QHBoxLayout()
         self.loc_lbl = QLabel(self.tr_("config_location", path=str(self.cfg.path)))
         self.loc_lbl.setObjectName("hint")
@@ -209,6 +245,62 @@ class ConfigView(QWidget):
         self.theme_combo.blockSignals(True)
         self.theme_combo.setCurrentIndex(_THEME_PREFS.index(pref))
         self.theme_combo.blockSignals(False)
+
+    def sync_zoom_combo(self) -> None:
+        zoom = self.cfg.zoom if self.cfg.zoom in ZOOM_LEVELS else "standard"
+        self.zoom_combo.blockSignals(True)
+        self.zoom_combo.setCurrentIndex(ZOOM_LEVELS.index(zoom))
+        self.zoom_combo.blockSignals(False)
+
+    def _on_zoom_combo_changed(self, index: int) -> None:
+        if 0 <= index < len(ZOOM_LEVELS):
+            self.zoom_change_requested.emit(ZOOM_LEVELS[index])
+
+    def _accent_swatch(self, value: str, name: str, shown: str) -> QPushButton:
+        btn = QPushButton()
+        btn.setFixedSize(24, 24)
+        btn.setToolTip(name)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        if not value:
+            btn.setText("•")   # marks "the theme's own accent" apart from an identical preset
+        btn.setProperty("accent_value", value)
+        btn.setProperty("accent_shown", shown)
+        btn.clicked.connect(lambda _=False, v=value: self.accent_change_requested.emit(v))
+        self.accent_swatches.append((value, btn))
+        return btn
+
+    def _style_swatch(self, btn: QPushButton, selected: bool) -> None:
+        shown = btn.property("accent_shown")
+        ring = COLORS["text"] if selected else "transparent"
+        btn.setStyleSheet(
+            f"QPushButton {{ background: {shown}; border-radius: 12px; padding: 0px; "
+            f"border: 2px solid {ring}; color: rgba(255, 255, 255, 200); font-size: 14px; }}"
+            f"QPushButton:hover {{ border: 2px solid {COLORS['muted']}; }}")
+
+    def sync_accent_swatches(self) -> None:
+        """Ring the swatch matching cfg.accent; a custom colour (not one of
+        the presets) gets shown on the "+" button instead."""
+        current = (self.cfg.accent or "").upper()
+        values = {v.upper() for v, _b in self.accent_swatches}
+        for value, btn in self.accent_swatches:
+            self._style_swatch(btn, value.upper() == current)
+        custom = bool(current) and current not in values
+        if custom:
+            self.accent_custom_btn.setText("")
+            self.accent_custom_btn.setStyleSheet(
+                f"QPushButton {{ background: {current}; border-radius: 12px; padding: 0px; "
+                f"border: 2px solid {COLORS['text']}; }}")
+        else:
+            self.accent_custom_btn.setText("+")
+            self.accent_custom_btn.setStyleSheet(
+                f"QPushButton {{ border: 1px dashed {COLORS['muted']}; border-radius: 12px; "
+                f"padding: 0px; color: {COLORS['muted']}; font-weight: 700; }}")
+
+    def _on_accent_custom_clicked(self) -> None:
+        initial = QColor(self.cfg.accent) if self.cfg.accent else QColor(default_accent())
+        color = QColorDialog.getColor(initial, self, self.tr_("accent_custom"))
+        if color.isValid():
+            self.accent_change_requested.emit(color.name().upper())
 
     def _on_theme_combo_changed(self, index: int) -> None:
         if 0 <= index < len(_THEME_PREFS):
@@ -393,7 +485,7 @@ class ConfigView(QWidget):
         self.tags_list_lbl.setObjectName("hint")
         self.tags_list_lbl.setWordWrap(True)
         self.tags_list_lbl.setTextFormat(Qt.TextFormat.RichText)
-        self.tags_list_lbl.setStyleSheet("font-size: 14px;")
+        self.tags_list_lbl.setStyleSheet(f"font-size: {fs(14)}px;")
         card.body.addWidget(self.tags_list_lbl)
 
         row = QHBoxLayout()
@@ -1341,6 +1433,14 @@ class ConfigView(QWidget):
             self.theme_combo.setItemText(i, self.tr_(f"theme_{p}"))
         self.theme_combo.blockSignals(False)
         self.sync_theme_combo()
+        self.zoom_lbl.setText(self.tr_("zoom_label"))
+        self.zoom_combo.blockSignals(True)
+        for i, z in enumerate(ZOOM_LEVELS):
+            self.zoom_combo.setItemText(i, self.tr_(f"zoom_{z}"))
+        self.zoom_combo.blockSignals(False)
+        self.accent_lbl.setText(self.tr_("accent_label"))
+        self.accent_custom_btn.setToolTip(self.tr_("accent_custom"))
+        self.accent_swatches[0][1].setToolTip(self.tr_("accent_default"))
 
         self.fetch_card_ref.title_lbl.setText(self.tr_("fetch_title"))
         self.fetch_help_lbl.setText(self.tr_("fetch_help"))

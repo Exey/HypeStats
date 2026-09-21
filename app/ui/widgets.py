@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from ..mentions import tg_deep_link
 from ..scoring import GAUGE_MAX
 from .charts import GaugeDial, Sparkline
-from .theme import COLORS, add_shadow, svg_pixmap
+from .theme import COLORS, add_shadow, fs, svg_pixmap, zoom_extra
 
 
 def open_external_link(url: str) -> None:
@@ -35,6 +35,13 @@ POST_CARD_PLACEHOLDER_PIXEL_SIZE = 52   # 🏞️/▶️/⚪️ font-size on a c
 POST_CARD_TEXT_PIXEL_SIZE = 10
 POST_CARD_TEXT_LINES = 2
 POST_CARD_TEXT_WIDTH = POST_CARD_WIDTH - 20   # card's own left+right content margins
+
+
+def post_card_height() -> int:
+    """POST_CARD_HEIGHT, plus room for the card's text growing at a Large
+    zoom (see theme.zoom_extra) -- its width stays put, its height is what
+    the name/caption lines have to grow into."""
+    return POST_CARD_HEIGHT + zoom_extra(6)
 
 # media_type (see channel_stat.py) -> placeholder icon shown until a real
 # thumbnail is fetched; "" is both a genuine text-only post and an older
@@ -73,7 +80,7 @@ def elide_to_lines(text: str, width: int, max_lines: int, pixel_size: int) -> st
     if not text:
         return ""
     font = QFont()
-    font.setPixelSize(pixel_size)
+    font.setPixelSize(fs(pixel_size))
     fm = QFontMetrics(font)
 
     words = text.split(" ")
@@ -136,7 +143,7 @@ class PostCard(Card):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setFixedSize(POST_CARD_WIDTH, POST_CARD_HEIGHT)
+        self.setFixedSize(POST_CARD_WIDTH, post_card_height())
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._link = ""
 
@@ -159,7 +166,7 @@ class PostCard(Card):
         self.thumb_lbl = QLabel()
         self.thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.thumb_lbl.setFixedHeight(POST_CARD_THUMB_HEIGHT)
-        self.thumb_lbl.setStyleSheet(f"font-size: {POST_CARD_PLACEHOLDER_PIXEL_SIZE}px;")
+        self.thumb_lbl.setStyleSheet(f"font-size: {fs(POST_CARD_PLACEHOLDER_PIXEL_SIZE)}px;")
         self.thumb_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         lay.addWidget(self.thumb_lbl)
 
@@ -175,7 +182,7 @@ class PostCard(Card):
         self.media_overlay_lbl = QLabel()
         self.media_overlay_lbl.setStyleSheet(
             "background: rgba(0, 0, 0, 150); color: white; border-radius: 4px; "
-            "padding: 1px 5px; font-size: 10px; font-weight: 600;")
+            f"padding: 1px 5px; font-size: {fs(10)}px; font-weight: 600;")
         self.media_overlay_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.media_overlay_lbl.setVisible(False)
         overlay_lay.addWidget(self.media_overlay_lbl)
@@ -188,7 +195,7 @@ class PostCard(Card):
         self.text_lbl.setWordWrap(False)
         self.text_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.text_lbl.setObjectName("hint")
-        self.text_lbl.setStyleSheet("font-size: 10px;")
+        self.text_lbl.setStyleSheet(f"font-size: {fs(POST_CARD_TEXT_PIXEL_SIZE)}px;")
         self.text_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         lay.addWidget(self.text_lbl)
 
@@ -265,7 +272,7 @@ class StatCard(Card):
         # lives right here instead of a separate control elsewhere on the
         # page, since it's specific to this one card's own value.
         self.action_btn = QPushButton()
-        self.action_btn.setStyleSheet("padding: 2px 8px; font-size: 11px;")
+        self.action_btn.setStyleSheet(f"padding: 2px 8px; font-size: {fs(11)}px;")
         self.action_btn.setVisible(False)
         lay.addWidget(self.action_btn)
 
@@ -317,8 +324,8 @@ class StatCard(Card):
         # compact sizing and the lowest-value text color are combined here
         # rather than in set_compact()/set_lowest() directly (setStyleSheet
         # replaces the whole local sheet, it doesn't merge across calls).
-        title = "font-size: 11px;" if self._compact else ""
-        value = "font-size: 18px;" if self._compact else ""
+        title = f"font-size: {fs(11)}px;" if self._compact else ""
+        value = f"font-size: {fs(18)}px;" if self._compact else ""
         if self._lowest:
             title += " color: #D9B8DE;"
             value += " color: #FFFFFF;"
@@ -439,7 +446,7 @@ class NavButton(QPushButton):
             self._icon.setText(self._badge_text)
             self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._icon.setStyleSheet(
-                f"color: {self._badge_color}; font-size: 9px; font-weight: 800;")
+                f"color: {self._badge_color}; font-size: {fs(9)}px; font-weight: 800;")
             return
         self._icon.setText("")
         self._icon.setStyleSheet("")

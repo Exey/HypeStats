@@ -105,7 +105,11 @@ them carries the current selection over rather than resetting it):
   picker) — exact-text name overlap between every pair of loaded columns
   (1-based position, e.g. "1↔2: 4, 2↔3: 2, 1↔4: 1"), most-overlapping pair
   first, a quick "these two cover the same people" signal before reading
-  four columns of text (hover it for which position is which channel). Each
+  four columns of text (hover it for which position is which channel). A
+  **Similar MD** button to its left exports that overlap as a Markdown
+  table (`| name variants | channel 1 | channel 2 | … |`, one row per person
+  named by two or more loaded channels, variants grouped case-/declension-
+  insensitively, each channel cell linking every post that names them). Each
   column's title names the channel and the full post date range already
   stored for it (e.g. "posts 2019-08 — 2026-09"), and below that a sortable
   table (click a header to sort by **ID** — the post id, a bit wider than a
@@ -336,9 +340,21 @@ the main forecast table intact and appends just the MPR Pairs table
 
 - **Bilingual** — English and Russian, switchable at runtime with no widget
   rebuild (a running fetch and unsaved fields survive the switch).
-- **Light / Dark theme** — follows the OS appearance by default (and updates
-  live if you flip it), or pin System / Light / Dark from the **Theme** menu
-  or the picker on the Config screen.
+- **Themes, accent color and zoom** — follows the OS appearance by default
+  (and updates live if you flip it), or pin System / Light / Dark / **Black
+  (AMOLED)** from the **Theme** menu or the Config screen's Settings card. The
+  Black theme is a pure-#000 window with dark-grey surfaces, after the
+  Telegram themes in `_ref_themes/`. An **Accent color** row of round swatches
+  (those reference themes' accents — Pixel Blue, Cyan, Lime, Yellow, Orange,
+  Fire, Crimson, Quite Red, Phlox — plus the theme's own default and a `+`
+  custom picker) recolors the accent in *any* theme, nudged lighter/darker per
+  theme to stay readable (a neon lime on white, a deep crimson on black) with
+  the primary-button text flipping to dark on a light accent. **Interface
+  size** zooms every font: *Small* is −2 pt on all text and −3 on big titles
+  (page titles, stat values, the brand), *Large* is +2 pt on all text and +1 on
+  titles, *Standard* is unchanged (`theme.fs`; the sidebar and post cards
+  widen/heighten a little at Large so text isn't clipped). All three are
+  stored in `config.json`.
 - Telegram work runs on a background thread, so the GUI never freezes; scans
   are cancellable. Rate limits (FloodWait) and transient network errors are
   retried automatically with backoff.
@@ -848,7 +864,7 @@ config folder** to jump straight there.
 | Config, sessions, checkpoints, folders, tags, mentions, media cache | `~/Library/Application Support/TgChannelStat` | `%APPDATA%\TgChannelStat` | `$XDG_CONFIG_HOME` or `~/.config/TgChannelStat` |
 | Logs | `~/Library/Logs/TgChannelStat` | `%LOCALAPPDATA%\TgChannelStat\logs` | `$XDG_STATE_HOME` or `~/.local/state/tgchannelstat` |
 
-- **`config.json`** — language, theme, profiles, and connection fields.
+- **`config.json`** — language, theme, accent color, zoom, profiles, and connection fields.
 - **Sessions** (`sessions/`) — Telethon session files (one per profile).
 - **Checkpoints** (`checkpoints/<channel>.json`) — the per-channel fetch
   results shown in the sidebar. `@Name`, `Name`, and the `-100…` ID all map

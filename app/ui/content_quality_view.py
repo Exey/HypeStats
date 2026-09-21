@@ -57,8 +57,9 @@ from ..store import ChannelStore
 from ..tools.media_fetch import run_thumbnail_cache
 from ..worker import ToolWorker
 from .dashboard_view import ChannelReportDialog, build_post_link, fmt_int
+from .theme import fs
 from .widgets import (
-    PostCard, POST_CARD_HEIGHT as CARD_HEIGHT, POST_CARD_PLACEHOLDERS as _MEDIA_PLACEHOLDERS,
+    PostCard, POST_CARD_PLACEHOLDERS as _MEDIA_PLACEHOLDERS,
     POST_CARD_TEXT_LINES as _TEXT_LINES, POST_CARD_TEXT_PIXEL_SIZE as _TEXT_PIXEL_SIZE,
     POST_CARD_TEXT_WIDTH as _TEXT_WIDTH, POST_CARD_THUMB_HEIGHT as _THUMB_HEIGHT,
     POST_CARD_WIDTH as CARD_WIDTH, elide_to_lines as _elide_to_lines, format_media_counts,
@@ -918,7 +919,7 @@ class ContentQualityView(QWidget):
         # yet reflect the global QSS font-size rule (see _elide_to_lines).
         msg = msg.strip()
         font = QFont()
-        font.setPixelSize(_MEDIA_LOG_PIXEL_SIZE)
+        font.setPixelSize(fs(_MEDIA_LOG_PIXEL_SIZE))
         elided = QFontMetrics(font).elidedText(
             msg, Qt.TextElideMode.ElideRight, _MEDIA_LOG_WIDTH)
         self.media_log_lbl.setText(elided)

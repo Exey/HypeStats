@@ -18,7 +18,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QDial, QSizePolicy, QToolTip, QWidget
 
-from .theme import COLORS
+from .theme import COLORS, fs
 
 
 def _nice_ceiling(value: float) -> int:
@@ -88,7 +88,7 @@ class BarChart(QWidget):
         top = _nice_ceiling(max(self._values))
 
         # y gridlines + labels
-        p.setFont(QFont(self.font().family(), 9))
+        p.setFont(QFont(self.font().family(), fs(9)))
         grid_pen = QPen(QColor(COLORS["line"]))
         grid_pen.setWidthF(1.0)
         steps = 4
@@ -132,7 +132,7 @@ class BarChart(QWidget):
 
             if i % label_every == 0 and i < len(self._labels):
                 p.setPen(QColor(COLORS["faint"]))
-                p.setFont(QFont(self.font().family(), 9))
+                p.setFont(QFont(self.font().family(), fs(9)))
                 p.drawText(QRectF(cx - slot / 2, plot.bottom() + 4, slot, 18),
                            Qt.AlignmentFlag.AlignCenter, str(self._labels[i]))
         p.end()
@@ -330,7 +330,7 @@ class MultiLineChart(QWidget):
             p.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y))
             if shared_top is not None:
                 p.setPen(QColor(COLORS["faint"]))
-                p.setFont(QFont(self.font().family(), 9))
+                p.setFont(QFont(self.font().family(), fs(9)))
                 p.drawText(QRectF(0, y - 8, self._pad_l - 8, 16),
                            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                            self._value_fmt(round(shared_top * frac)))
@@ -343,11 +343,11 @@ class MultiLineChart(QWidget):
             if i % label_every:
                 continue
             p.setPen(QColor(COLORS["faint"]))
-            p.setFont(QFont(self.font().family(), 9))
+            p.setFont(QFont(self.font().family(), fs(9)))
             p.drawText(QRectF(x_at(i) - 34, plot.bottom() + 4, 68, 18),
                        Qt.AlignmentFlag.AlignCenter, str(lab))
 
-        label_font = QFont(self.font().family(), 8)
+        label_font = QFont(self.font().family(), fs(8))
         for s in self._series:
             values = s.get("values") or []
             if len(values) != n:
@@ -510,7 +510,7 @@ class GaugeDial(QDial):
             p.drawArc(rect, self.ARC_START * 16, -int(self.ARC_SPAN * 16 * frac))
 
         p.setPen(QColor(COLORS["text"]))
-        f = QFont(self.font().family(), max(9, int(side * 0.16)), QFont.Weight.Bold)
+        f = QFont(self.font().family(), fs(max(9, int(side * 0.16))), QFont.Weight.Bold)
         p.setFont(f)
         p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, str(int(round(self.value()))))
         p.end()

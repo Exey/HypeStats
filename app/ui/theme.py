@@ -5,8 +5,11 @@ card grid, drop shadows, rounded corners and a single blue accent — but the
 QSvgPixmap recolor trick and shadow helper are generalised here so every
 widget in the app can share them.
 
-Light and dark are just two colour dicts (LIGHT / DARK). `COLORS` is the
-*active* one — kept as a single mutable dict object (rather than rebound)
+Light, dark and a pure-black "AMOLED" theme (BLACK -- black window, dark-grey
+surfaces and a single bright accent, after the Telegram themes in
+_ref_themes/) are just colour dicts (LIGHT / DARK / BLACK), any of which can
+be re-accented (ACCENT_PRESETS / set_appearance) and re-sized (ZOOM_LEVELS /
+fs). `COLORS` is the *active* one — kept as a single mutable dict object (rather than rebound)
 so every module that did `from .theme import COLORS` sees a switch without
 re-importing; callers just need to rebuild their widgets afterwards (see
 MainWindow._switch_theme, which mirrors the existing language-switch
@@ -23,6 +26,71 @@ from PySide6.QtWidgets import QGraphicsDropShadowEffect
 ASSETS = Path(__file__).resolve().parent.parent.parent / "assets"
 SVGS = ASSETS / "svgs"
 
+# ------------------------------------------------------------ colour maths
+def _rgb(hex_color: str) -> tuple[float, float, float]:
+    c = QColor(hex_color)
+    return c.redF(), c.greenF(), c.blueF()
+
+
+def _mix(a: str, b: str, t: float) -> str:
+    """`a` blended toward `b` by `t` (0 = a, 1 = b), as "#RRGGBB"."""
+    ra, ga, ba = _rgb(a)
+    rb, gb, bb = _rgb(b)
+    return QColor.fromRgbF(ra + (rb - ra) * t, ga + (gb - ga) * t,
+                           ba + (bb - ba) * t).name().upper()
+
+
+def _luminance(hex_color: str) -> float:
+    def lin(v: float) -> float:
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    r, g, b = (lin(v) for v in _rgb(hex_color))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _contrast(a: str, b: str) -> float:
+    la, lb = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+def _readable_on(accent: str, bg: str, dark_bg: bool, minimum: float = 3.0) -> str:
+    """`accent`, nudged lighter (dark bg) or darker (light bg) just far
+    enough to keep `minimum`:1 contrast against `bg` -- a neon lime or
+    yellow is a fine accent on black but unreadable on white, and a deep
+    crimson the reverse."""
+    color = QColor(accent)
+    for _ in range(40):
+        if _contrast(color.name(), bg) >= minimum:
+            break
+        h, s, l, a = color.getHslF()
+        l = min(1.0, l + 0.03) if dark_bg else max(0.0, l - 0.03)
+        color.setHslF(max(h, 0.0), s, l, a)
+    return color.name().upper()
+
+
+def _accent_tokens(base: dict, accent: str, dark: bool) -> dict:
+    """Every accent-derived palette entry for `accent` on `base`'s surfaces
+    -- see set_theme. `on_accent` is the text colour that stays
+    readable *on* the accent (primary buttons), which flips to near-black
+    for a light accent like yellow."""
+    acc = _readable_on(accent, base["card"], dark)
+    disabled = _mix(base["card"], acc, 0.38 if dark else 0.45)
+    return {
+        "accent": acc,
+        "accent_soft": _mix(base["card"], acc, 0.16 if dark else 0.10),
+        "accent_track": _mix(base["card"], acc, 0.10 if dark else 0.07),
+        "accent_hover": _mix(acc, "#FFFFFF" if dark else "#000000", 0.18 if dark else 0.15),
+        "accent_disabled": disabled,
+        "accent_disabled_text": (_mix(disabled, base["text"], 0.45) if dark
+                                 else _mix(disabled, "#FFFFFF", 0.7)),
+        "on_accent": ("#FFFFFF" if _contrast(acc, "#FFFFFF") >= _contrast(acc, "#0B0B0B")
+                      else "#0B0B0B"),
+        "hour": acc,
+        "activity": acc,
+        "bar_from": _mix(acc, "#FFFFFF", 0.15),
+        "bar_to": acc,
+    }
+
+
 # ------------------------------------------------------------------ palette
 LIGHT = {
     "bg": "#F4F6FA",
@@ -34,6 +102,7 @@ LIGHT = {
     "accent_hover": "#1449D6",
     "accent_disabled": "#A9C1F7",
     "accent_disabled_text": "#EEF3FF",
+    "on_accent": "#FFFFFF",
     "text": "#12203A",
     "muted": "#6B7480",
     "faint": "#9AA3AF",
@@ -62,6 +131,7 @@ DARK = {
     "accent_hover": "#6FA3FF",
     "accent_disabled": "#2C3B5E",
     "accent_disabled_text": "#7C88A3",
+    "on_accent": "#FFFFFF",
     "text": "#E7ECF5",
     "muted": "#97A2B8",
     "faint": "#6B7690",
@@ -80,6 +150,47 @@ DARK = {
     "shadow": (0, 0, 0),
 }
 
+# Pure-black "AMOLED" theme, after the Telegram themes in _ref_themes/
+# (Amoled Black / the ABTheme series): a #000 window, dark-grey surfaces
+# (their #232323 / #373737 bubble greys) and one bright accent -- Pixel Blue
+# here, swappable through ACCENT_PRESETS like Telegram's own accent picker.
+BLACK = {
+    "bg": "#000000",
+    "card": "#141414",
+    "card_border": "#262626",
+    "text": "#F2F2F2",
+    "muted": "#A8A8A8",
+    "faint": "#767676",
+    "line": "#262626",
+    "scrollbar": "#3A3A3A",
+    "good": "#34D399",
+    "warn": "#FBBF24",
+    "hot": "#F87171",
+    "win": "#F2C230",
+    "weekday": "#B28DFF",
+    "posts": "#22D3EE",
+    "shadow": (0, 0, 0),
+}
+BLACK.update(_accent_tokens(BLACK, "#5B97F6", dark=True))
+
+# Accent choices, lifted from the reference Telegram themes' accent colours
+# (CRIMSON / CYAN / FIRE / LIME / ORANGE / PHLOX / PIXEL BLUE / Quite Red /
+# YELLOW). "" = the active theme's own default. Each is adjusted per theme
+# for readability (see _readable_on), so a neon one still works on light.
+ACCENT_PRESETS = [
+    ("#5B97F6", "Pixel Blue"), ("#00D7D7", "Cyan"), ("#00D700", "Lime"),
+    ("#E0E505", "Yellow"), ("#FF8C00", "Orange"), ("#FF3B30", "Fire"),
+    ("#DC123C", "Crimson"), ("#E0415B", "Quite Red"), ("#DF00FF", "Phlox"),
+]
+
+# ---------------------------------------------------------------- zoom
+# Interface zoom: (regular delta, title delta) in font px on top of the
+# stylesheet's own sizes. Anything at/above TITLE_MIN_SIZE is a "big title"
+# (page titles, stat values, the brand) and moves less than body text.
+ZOOM_LEVELS = ("small", "standard", "large")
+_ZOOM_DELTAS = {"small": (-2, -3), "standard": (0, 0), "large": (2, 1)}
+TITLE_MIN_SIZE = 18
+
 # Fixed 16-swatch palette offered when picking a folder color. Same set in
 # both themes — these are saturated enough to read on light or dark card
 # backgrounds.
@@ -94,7 +205,9 @@ FOLDER_COLORS = [
 # module docstring for why this stays one dict object rather than a rebound
 # name.
 COLORS = dict(LIGHT)
-_mode = "light"  # resolved 'light' | 'dark', kept for add_shadow()/queries
+_mode = "light"  # resolved 'light' | 'dark' | 'black', kept for queries
+_accent = ""     # "" = the theme's own accent, else "#RRGGBB"
+_zoom = "standard"
 
 
 def resolve_system_dark() -> bool:
@@ -107,11 +220,10 @@ def resolve_system_dark() -> bool:
 
 
 def resolve_mode(pref: str) -> str:
-    """pref: 'light' | 'dark' | 'system' -> resolved 'light'/'dark'."""
-    if pref == "dark":
-        return "dark"
-    if pref == "light":
-        return "light"
+    """pref: 'light' | 'dark' | 'black' | 'system' -> resolved
+    'light'/'dark'/'black' ('system' only ever follows light/dark)."""
+    if pref in ("light", "dark", "black"):
+        return pref
     return "dark" if resolve_system_dark() else "light"
 
 
@@ -119,18 +231,46 @@ def current_mode() -> str:
     return _mode
 
 
-def set_theme(pref: str) -> str:
-    """Resolve `pref` and update COLORS in place. Returns the resolved mode."""
-    global _mode
+def default_accent() -> str:
+    """The active theme's own accent colour (what the "Default" choice in
+    Settings means), whatever custom accent is currently applied."""
+    return {"dark": DARK, "black": BLACK}.get(_mode, LIGHT)["accent"]
+
+
+def fs(size: float) -> int:
+    """`size` (a font size in the units the stylesheet uses) at the current
+    zoom -- every hardcoded font size in the app goes through this so the
+    Settings zoom reaches all of them, not just the global stylesheet."""
+    regular, title = _ZOOM_DELTAS.get(_zoom, (0, 0))
+    return max(6, round(size + (title if size >= TITLE_MIN_SIZE else regular)))
+
+
+def zoom_extra(step: float) -> int:
+    """`step` px of extra room per positive font-size step of the current
+    zoom (0 at Standard/Small) -- for fixed-size boxes that text now grows
+    inside."""
+    return round(step * max(0, _ZOOM_DELTAS.get(_zoom, (0, 0))[0]))
+
+
+def set_theme(pref: str, accent: str = "", zoom: str = "standard") -> str:
+    """Resolve `pref` and update COLORS in place (recolouring its accent
+    entries if `accent` is a "#RRGGBB"), and set the zoom `fs()` reads.
+    Returns the resolved mode."""
+    global _mode, _accent, _zoom
     _mode = resolve_mode(pref)
+    _accent = accent if QColor(accent).isValid() and accent else ""
+    _zoom = zoom if zoom in ZOOM_LEVELS else "standard"
+    base = {"dark": DARK, "black": BLACK}.get(_mode, LIGHT)
     COLORS.clear()
-    COLORS.update(DARK if _mode == "dark" else LIGHT)
+    COLORS.update(base)
+    if _accent:
+        COLORS.update(_accent_tokens(base, _accent, dark=_mode != "light"))
     return _mode
 
 
-def apply_theme(app, pref: str) -> str:
+def apply_theme(app, pref: str, accent: str = "", zoom: str = "standard") -> str:
     """set_theme() + push the resulting QSS onto the running QApplication."""
-    mode = set_theme(pref)
+    mode = set_theme(pref, accent, zoom)
     app.setStyleSheet(build_qss())
     return mode
 
@@ -174,7 +314,7 @@ def build_qss() -> str:
     return f"""
     QWidget {{
         color: {c['text']};
-        font-size: 14px;
+        font-size: {fs(14)}px;
     }}
     QWidget#root {{ background: {c['bg']}; }}
     QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; }}
@@ -186,25 +326,25 @@ def build_qss() -> str:
         border: none;
     }}
     QLabel#brand {{
-        font-size: 19px; font-weight: 800; color: {c['text']};
+        font-size: {fs(19)}px; font-weight: 800; color: {c['text']};
         padding: 4px 6px;
     }}
     QLabel#brandDot {{ color: {c['accent']}; }}
     QLabel#sectionLabel {{
-        color: {c['faint']}; font-size: 11px; font-weight: 700;
+        color: {c['faint']}; font-size: {fs(11)}px; font-weight: 700;
         letter-spacing: 1px; padding: 4px 8px;
     }}
     QPushButton#navBtn {{
         text-align: left; border: none; border-radius: 12px;
-        padding: 10px 12px; font-size: 14px; font-weight: 600;
+        padding: 10px 12px; font-size: {fs(14)}px; font-weight: 600;
         color: {c['muted']}; background: transparent;
     }}
     QPushButton#navBtn:hover {{ background: {c['bg']}; }}
     QPushButton#navBtn:checked {{
         background: {c['accent_soft']}; color: {c['accent']}; font-weight: 700;
     }}
-    QLabel#navEmpty {{ color: {c['faint']}; font-size: 12px; padding: 6px 10px; }}
-    QLabel#navMeta {{ color: {c['faint']}; font-size: 11px; font-weight: 700; }}
+    QLabel#navEmpty {{ color: {c['faint']}; font-size: {fs(12)}px; padding: 6px 10px; }}
+    QLabel#navMeta {{ color: {c['faint']}; font-size: {fs(11)}px; font-weight: 700; }}
 
     /* ---------------- cards ---------------- */
     QFrame#card {{
@@ -212,15 +352,15 @@ def build_qss() -> str:
         border-radius: 18px;
         border: 1px solid {c['card_border']};
     }}
-    QLabel#cardTitle {{ color: {c['muted']}; font-size: 13px; font-weight: 600; }}
-    QLabel#statValue {{ color: {c['text']}; font-size: 26px; font-weight: 800; }}
-    QLabel#statSub {{ color: {c['faint']}; font-size: 12px; }}
+    QLabel#cardTitle {{ color: {c['muted']}; font-size: {fs(13)}px; font-weight: 600; }}
+    QLabel#statValue {{ color: {c['text']}; font-size: {fs(26)}px; font-weight: 800; }}
+    QLabel#statSub {{ color: {c['faint']}; font-size: {fs(12)}px; }}
 
-    QLabel#pageTitle {{ font-size: 24px; font-weight: 800; color: {c['text']}; }}
-    QLabel#pageSub {{ color: {c['muted']}; font-size: 13px; }}
-    QLabel#sectionTitle {{ font-size: 15px; font-weight: 700; color: {c['text']}; }}
-    QLabel#hint {{ color: {c['muted']}; font-size: 12px; }}
-    QLabel#status {{ color: {c['muted']}; font-size: 12px; }}
+    QLabel#pageTitle {{ font-size: {fs(24)}px; font-weight: 800; color: {c['text']}; }}
+    QLabel#pageSub {{ color: {c['muted']}; font-size: {fs(13)}px; }}
+    QLabel#sectionTitle {{ font-size: {fs(15)}px; font-weight: 700; color: {c['text']}; }}
+    QLabel#hint {{ color: {c['muted']}; font-size: {fs(12)}px; }}
+    QLabel#status {{ color: {c['muted']}; font-size: {fs(12)}px; }}
 
     /* ---------------- inputs ---------------- */
     QLineEdit, QSpinBox, QComboBox {{
@@ -243,7 +383,7 @@ def build_qss() -> str:
     QPushButton:hover {{ background: {c['bg']}; }}
     QPushButton:disabled {{ color: {c['faint']}; }}
     QPushButton#primary {{
-        background: {c['accent']}; color: white; border: none; font-weight: 700;
+        background: {c['accent']}; color: {c['on_accent']}; border: none; font-weight: 700;
     }}
     QPushButton#primary:hover {{ background: {c['accent_hover']}; }}
     QPushButton#primary:disabled {{
@@ -263,14 +403,14 @@ def build_qss() -> str:
     QHeaderView::section {{
         background: {c['card']}; color: {c['muted']}; border: none;
         border-bottom: 1px solid {c['line']}; padding: 8px 6px;
-        font-weight: 700; font-size: 12px;
+        font-weight: 700; font-size: {fs(12)}px;
     }}
     QTableWidget::item {{ padding: 6px; border-bottom: 1px solid {c['line']}; }}
 
     /* Mentions view's per-column "Summary" stats table -- deliberately as
        quiet as the "hint"-styled Posts/Names Found lines above it, not a
        full-size data table, since it's a plain key/value recap. */
-    QTableWidget#statsTable {{ font-size: 12px; }}
+    QTableWidget#statsTable {{ font-size: {fs(12)}px; }}
     QTableWidget#statsTable::item {{
         padding: 3px 6px; border-bottom: none; color: {c['muted']};
     }}
@@ -280,7 +420,7 @@ def build_qss() -> str:
        Posts/Names Found lines each sits under), just keeping their own row
        divider since, unlike Summary, these are genuine sortable data
        tables, not a quiet key/value recap. */
-    QTableWidget#mentionsColumnTable {{ font-size: 12px; }}
+    QTableWidget#mentionsColumnTable {{ font-size: {fs(12)}px; }}
     QTableWidget#mentionsColumnTable::item {{ padding: 4px 6px; }}
 
     QProgressBar {{
@@ -291,7 +431,7 @@ def build_qss() -> str:
 
     QPlainTextEdit {{
         background: {c['bg']}; border: 1px solid {c['line']}; border-radius: 10px;
-        color: {c['muted']}; font-family: "SF Mono","Menlo",monospace; font-size: 12px;
+        color: {c['muted']}; font-family: "SF Mono","Menlo",monospace; font-size: {fs(12)}px;
     }}
     QGroupBox {{
         border: 1px solid {c['line']}; border-radius: 12px; margin-top: 10px;

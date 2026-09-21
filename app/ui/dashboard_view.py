@@ -39,10 +39,10 @@ from ..tools.media_fetch import run_thumbnail_cache
 from ..worker import ToolWorker
 from .charts import BarChart, MultiLineChart
 from .folder_dialog import FolderManagerDialog
-from .theme import COLORS
+from .theme import COLORS, fs
 from .widgets import (
     Card, ChartCard, PostCard, SectionCard, StatCard, elide_to_lines, folder_icon, hline,
-    open_external_link, POST_CARD_HEIGHT, POST_CARD_PLACEHOLDERS, POST_CARD_TEXT_LINES,
+    open_external_link, post_card_height, POST_CARD_PLACEHOLDERS, POST_CARD_TEXT_LINES,
     POST_CARD_TEXT_PIXEL_SIZE, POST_CARD_TEXT_WIDTH, POST_CARD_THUMB_HEIGHT, POST_CARD_WIDTH,
 )
 
@@ -351,7 +351,7 @@ class DashboardView(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setFixedHeight(POST_CARD_HEIGHT + 16)
+        scroll.setFixedHeight(post_card_height() + 16)
         holder = QWidget()
         self.recent_posts_lay = QHBoxLayout(holder)
         self.recent_posts_lay.setContentsMargins(0, 2, 0, 2)
@@ -450,7 +450,7 @@ class DashboardView(QWidget):
         # through for High-Quality Posts' identical label).
         msg = msg.strip()
         font = QFont()
-        font.setPixelSize(_MEDIA_LOG_PIXEL_SIZE)
+        font.setPixelSize(fs(_MEDIA_LOG_PIXEL_SIZE))
         elided = QFontMetrics(font).elidedText(
             msg, Qt.TextElideMode.ElideRight, _MEDIA_LOG_WIDTH)
         self.media_log_lbl.setText(elided)

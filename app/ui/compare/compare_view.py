@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from ...errors import friendly_os_error
 from ..dashboard_view import fmt_int, short_num
-from ..theme import COLORS
+from ..theme import COLORS, fs
 from ..widgets import StatCard, hline
 
 # (card key, i18n key) — order here is display order top-to-bottom.
@@ -127,7 +127,7 @@ class CompareView(QWidget):
 
             crown_lbl = QLabel("👑")
             crown_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-            crown_lbl.setStyleSheet("font-size: 20px;")
+            crown_lbl.setStyleSheet(f"font-size: {fs(20)}px;")
             crown_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             crown_lbl.setVisible(False)
             header_stack.addWidget(crown_lbl)
@@ -137,7 +137,7 @@ class CompareView(QWidget):
             section_lbl = QLabel(self.tr_("compare_content_quality"))
             section_lbl.setObjectName("smallCapsTitle")
             section_lbl.setStyleSheet(
-                f"color: {COLORS['faint']}; font-size: 11px; font-weight: 700; "
+                f"color: {COLORS['faint']}; font-size: {fs(11)}px; font-weight: 700; "
                 f"letter-spacing: 1.5px; padding-top: 4px;")
             for key, title_key in _METRICS:
                 title = self._metric_title(key, title_key)

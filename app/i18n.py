@@ -430,6 +430,14 @@ EN = {
                                        "mentions.md.",
     "mentions_stats_unresolved_col_link": "Link",
     "mentions_similar_title": "Similar mentions",
+    "mentions_similar_md_btn": "Similar MD",
+    "mentions_similar_md_hint": "Export the people two or more loaded channels "
+                                "both mention as a Markdown table: name "
+                                "variants, then one column per channel with "
+                                "links to its posts.",
+    "mentions_similar_md_empty": "No names shared by two or more of the loaded "
+                                 "channels.",
+    "mentions_similar_md_col_names": "Name variants",
     "mentions_table_title": "mentions.md",
     "mentions_locate_btn": "Show in folder",
     "mentions_locate_hint": "Reveal mentions.md in Finder/Explorer",
@@ -478,6 +486,14 @@ EN = {
     "theme_system": "System",
     "theme_light": "Light",
     "theme_dark": "Dark",
+    "theme_black": "Black (AMOLED)",
+    "zoom_label": "Interface size",
+    "zoom_small": "Small (−2 pt, titles −3)",
+    "zoom_standard": "Standard",
+    "zoom_large": "Large (+2 pt, titles +1)",
+    "accent_label": "Accent color",
+    "accent_default": "Default",
+    "accent_custom": "Custom…",
     "env_imported": "Imported {n} value(s) from .env.",
     # generic
     "save": "💾 Save profile",
@@ -1084,6 +1100,14 @@ RU = {
                                        "mentions.md.",
     "mentions_stats_unresolved_col_link": "Ссылка",
     "mentions_similar_title": "Похожие упоминания",
+    "mentions_similar_md_btn": "Похожие MD",
+    "mentions_similar_md_hint": "Экспорт людей, которых упоминают два и более "
+                                "загруженных канала, в Markdown: варианты "
+                                "имени и по колонке на канал со ссылками на "
+                                "посты.",
+    "mentions_similar_md_empty": "Нет имён, общих для двух и более загруженных "
+                                 "каналов.",
+    "mentions_similar_md_col_names": "Варианты имени",
     "mentions_table_title": "mentions.md",
     "mentions_locate_btn": "Показать в папке",
     "mentions_locate_hint": "Показать mentions.md в Finder/Проводнике",
@@ -1131,6 +1155,14 @@ RU = {
     "theme_system": "Как в системе",
     "theme_light": "Светлая",
     "theme_dark": "Тёмная",
+    "theme_black": "Чёрная (AMOLED)",
+    "zoom_label": "Размер интерфейса",
+    "zoom_small": "Мелкий (−2 пт, заголовки −3)",
+    "zoom_standard": "Стандартный",
+    "zoom_large": "Крупный (+2 пт, заголовки +1)",
+    "accent_label": "Акцентный цвет",
+    "accent_default": "По умолчанию",
+    "accent_custom": "Свой цвет…",
     "env_imported": "Импортировано значений из .env: {n}.",
     "save": "💾 Сохранить профиль",
     "saved": "Профиль сохранён.",

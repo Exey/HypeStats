@@ -42,7 +42,9 @@ class Config:
     def __init__(self) -> None:
         self.path = config_dir() / "config.json"
         self.language: str = "en"
-        self.theme: str = "system"   # "system" | "light" | "dark"
+        self.theme: str = "system"   # "system" | "light" | "dark" | "black"
+        self.accent: str = ""        # "" = the theme's own accent, else "#RRGGBB"
+        self.zoom: str = "standard"  # "small" | "standard" | "large"
         self.current_profile: str = "default"
         self.profiles: dict[str, dict] = {"default": dict(EMPTY_PROFILE)}
         self.load()
@@ -53,6 +55,8 @@ class Config:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             self.language = data.get("language", "en")
             self.theme = data.get("theme", "system")
+            self.accent = data.get("accent", "") or ""
+            self.zoom = data.get("zoom", "standard") or "standard"
             self.current_profile = data.get("current_profile", "default")
             profiles = data.get("profiles") or {}
             self.profiles = {
@@ -69,6 +73,8 @@ class Config:
         data = {
             "language": self.language,
             "theme": self.theme,
+            "accent": self.accent,
+            "zoom": self.zoom,
             "current_profile": self.current_profile,
             "profiles": self.profiles,
         }

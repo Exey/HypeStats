@@ -39,7 +39,7 @@ class MainWindow(QMainWindow):
         self._current_key: str | None = None   # None => Config screen
         self._refetch_return_key: str | None = None  # dashboard to re-open after a lean refresh
         self._sidebar_folded = False
-        apply_theme(QApplication.instance(), self.cfg.theme)
+        self._apply_appearance()
         self._build_ui()
         try:
             # Live-follow the OS appearance while pref == "system".
@@ -102,6 +102,8 @@ class MainWindow(QMainWindow):
         self.config_view.checkpoints_changed.connect(self._on_checkpoints_changed)
         self.config_view.worker_started.connect(self._show_config)
         self.config_view.theme_change_requested.connect(self._switch_theme)
+        self.config_view.zoom_change_requested.connect(self._switch_zoom)
+        self.config_view.accent_change_requested.connect(self._switch_accent)
         self.dashboard = DashboardView(self.i18n, self.folder_store, self.tag_store, self.cfg)
         self.dashboard.refetch_requested.connect(self._on_refetch)
         self.dashboard.remove_requested.connect(self._on_remove)
@@ -179,7 +181,7 @@ class MainWindow(QMainWindow):
 
         theme_menu = self.menuBar().addMenu(tr("menu_theme"))
         for pref, label_key in (("system", "theme_system"), ("light", "theme_light"),
-                                ("dark", "theme_dark")):
+                                ("dark", "theme_dark"), ("black", "theme_black")):
             act = QAction(tr(label_key), self)
             act.setCheckable(True)
             act.setChecked(self.cfg.theme == pref)
@@ -374,26 +376,46 @@ class MainWindow(QMainWindow):
         self.unfold_btn.setToolTip(self.i18n.tr("nav_unfold_hint"))
 
     # --------------------------------------------------------------- theme
-    def _switch_theme(self, pref: str) -> None:
-        if pref == self.cfg.theme:
+    def _apply_appearance(self) -> None:
+        """Push the saved theme + accent colour + zoom onto the app."""
+        apply_theme(QApplication.instance(), self.cfg.theme, self.cfg.accent, self.cfg.zoom)
+
+    def _change_appearance(self, **changes: str) -> None:
+        """Common path for the theme / accent / zoom pickers: refuse while a
+        job is running (the rebuild below would tear its widgets down),
+        otherwise save, restyle and rebuild every screen in place."""
+        if all(getattr(self.cfg, k) == v for k, v in changes.items()):
             self._build_menu()
             return
         if self.config_view.is_running():
             QMessageBox.warning(self, self.i18n.tr("app_title"),
                                 self.i18n.tr("worker_running"))
             self._build_menu()
-            self.config_view.sync_theme_combo()  # revert the picker
+            # revert the pickers
+            self.config_view.sync_theme_combo()
+            self.config_view.sync_zoom_combo()
+            self.config_view.sync_accent_swatches()
             return
-        self.cfg.theme = pref
+        for k, v in changes.items():
+            setattr(self.cfg, k, v)
         self.cfg.save()
-        apply_theme(QApplication.instance(), pref)
-        self._build_ui()  # rebuild everything with the new palette
+        self._apply_appearance()
+        self._build_ui()  # rebuild everything with the new palette / sizes
+
+    def _switch_theme(self, pref: str) -> None:
+        self._change_appearance(theme=pref)
+
+    def _switch_zoom(self, zoom: str) -> None:
+        self._change_appearance(zoom=zoom)
+
+    def _switch_accent(self, accent: str) -> None:
+        self._change_appearance(accent=accent)
 
     def _on_system_theme_changed(self, *_args) -> None:
         """OS appearance flipped while pref == 'system' — follow it live."""
         if self.cfg.theme != "system" or self.config_view.is_running():
             return
-        apply_theme(QApplication.instance(), "system")
+        self._apply_appearance()
         self._build_ui()
 
     # --------------------------------------------------------------- close

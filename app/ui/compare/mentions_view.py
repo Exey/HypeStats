@@ -35,11 +35,12 @@ from urllib.parse import urlparse
 from PySide6.QtCore import QEvent, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QHeaderView, QInputDialog,
+    QApplication, QComboBox, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QHeaderView, QInputDialog,
     QLabel, QMenu, QMessageBox, QPushButton, QScrollArea, QTableWidget, QTableWidgetItem,
     QTextEdit, QVBoxLayout, QWidget,
 )
 
+from ...errors import friendly_os_error
 from ...mentions import (
     MentionsStore, NameExceptions, apply_no_link_penalty, cache_channel_mentions,
     canonical_link_key, classify_channel_links, extract_all_names_per_post,
@@ -50,7 +51,7 @@ from ...media_cache import thumbnail_path
 from ...periods import period_key_label
 from ...store import ChannelStore
 from ..dashboard_view import build_post_link
-from ..theme import COLORS
+from ..theme import COLORS, fs
 from ..widgets import StatCard, hline, open_external_link
 
 # media_type -> the label _format_media_type shows, in display order; a
@@ -263,6 +264,13 @@ class MentionsView(QWidget):
         # beat" signal before reading four columns of text. Same row as the
         # period picker; hidden below 2 loaded channels, since there's no
         # pair to compare yet.
+        # "Similar MD" (left of the summary) exports the same overlap as a
+        # Markdown table with links to the posts — see _build_similar_md.
+        self.similar_md_btn = QPushButton(self.tr_("mentions_similar_md_btn"))
+        self.similar_md_btn.setToolTip(self.tr_("mentions_similar_md_hint"))
+        self.similar_md_btn.clicked.connect(self._on_similar_md_clicked)
+        self.similar_md_btn.setVisible(False)
+        period_row.addWidget(self.similar_md_btn)
         self.similar_mentions_lbl = QLabel("")
         self.similar_mentions_lbl.setObjectName("sectionTitle")
         self.similar_mentions_lbl.setVisible(False)
@@ -465,6 +473,8 @@ class MentionsView(QWidget):
         self.period_lbl.setText(self.tr_("mentions_period_label"))
         self.reload_btn.setText(self.tr_("mentions_reload_btn"))
         self.reload_btn.setToolTip(self.tr_("mentions_reload_hint"))
+        self.similar_md_btn.setText(self.tr_("mentions_similar_md_btn"))
+        self.similar_md_btn.setToolTip(self.tr_("mentions_similar_md_hint"))
         self.empty_lbl.setText(self.tr_("mentions_empty"))
         self.table_title.setText(self.tr_("mentions_table_title"))
         self.locate_btn.setText(self.tr_("mentions_locate_btn"))
@@ -1369,6 +1379,7 @@ class MentionsView(QWidget):
         same people" signal before reading four columns of text. Hidden
         below 2 loaded channels, since there's no pair to compare yet."""
         loaded = [(i, col) for i, col in enumerate(self._columns) if col["channel"] is not None]
+        self.similar_md_btn.setVisible(len(loaded) >= 2)
         if len(loaded) < 2:
             self.similar_mentions_lbl.setVisible(False)
             return
@@ -1386,6 +1397,103 @@ class MentionsView(QWidget):
             f"{i + 1} = {col['channel'].get('title') or col['channel'].get('channel') or '—'}"
             for i, col in loaded))
         self.similar_mentions_lbl.setVisible(True)
+
+    def _build_similar_md(self) -> str:
+        """Markdown table of the people two or more loaded channels both
+        mention: `| name variants | channel 1 | channel 2 | ... |`, one row
+        per person, each channel cell listing every post of that channel
+        that names them as a bare t.me/<channel>/<id> link. "Name variants" are every surface form found
+        across the loaded columns (names_match — exact or a Russian case
+        variant, e.g. "Алиса"/"Алисой"), grouped into one row. Names only
+        one channel uses aren't "similar" and are left out. "" if nothing
+        overlaps. Most widely shared (then most-mentioned) first."""
+        loaded = [col for col in self._columns if col["channel"] is not None]
+        if len(loaded) < 2:
+            return ""
+        # (column index, name) nodes, one per distinct casefolded surface form
+        nodes: list[tuple[int, str]] = []
+        for ci, col in enumerate(loaded):
+            seen: set[str] = set()
+            for name in col["name_hits"]:
+                if name.casefold() not in seen:
+                    seen.add(name.casefold())
+                    nodes.append((ci, name))
+        parent = list(range(len(nodes)))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        # Only cross-column pairs need comparing: a same-column variant
+        # joins a group through whatever it matches in another column.
+        for x in range(len(nodes)):
+            for y in range(x + 1, len(nodes)):
+                if nodes[x][0] != nodes[y][0] and names_match(nodes[x][1], nodes[y][1]):
+                    parent[find(x)] = find(y)
+        groups: dict[int, list[int]] = {}
+        for x in range(len(nodes)):
+            groups.setdefault(find(x), []).append(x)
+
+        rows: list[tuple[int, int, list[str], list[list[int]]]] = []
+        for members in groups.values():
+            if len({nodes[x][0] for x in members}) < 2:
+                continue
+            variants = sorted({nodes[x][1] for x in members}, key=str.casefold)
+            per_col: list[list[int]] = []
+            for ci, col in enumerate(loaded):
+                ids: set[int] = set()
+                for x in members:
+                    if nodes[x][0] == ci:
+                        ids.update(col["name_hits"][nodes[x][1]])
+                # a case variant spelled identically (casefold) elsewhere in
+                # this column is the same hit list already; nothing to add
+                per_col.append(sorted(ids))
+            rows.append((sum(1 for ids in per_col if ids), sum(len(i) for i in per_col),
+                         variants, per_col))
+        if not rows:
+            return ""
+        rows.sort(key=lambda r: (-r[0], -r[1], r[2][0].casefold()))
+
+        def esc(text: str) -> str:
+            return text.replace("|", "\\|")
+
+        def header(col: dict) -> str:
+            ch = col["channel"]
+            return esc(ch.get("title") or ch.get("channel") or ch.get("username") or "—")
+
+        lines = ["| " + " | ".join([self.tr_("mentions_similar_md_col_names")]
+                                    + [header(c) for c in loaded]) + " |",
+                 "| " + " | ".join(["---"] * (len(loaded) + 1)) + " |"]
+        for _n, _t, variants, per_col in rows:
+            cells = [esc(", ".join(variants))]
+            for col, ids in zip(loaded, per_col):
+                ch = col["channel"]
+                channel_text = ch.get("channel") or ch.get("username") or ""
+                cells.append(", ".join(
+                    _link_post_id(channel_text, i).split("://", 1)[-1] for i in ids))
+            lines.append("| " + " | ".join(cells) + " |")
+        return "\n".join(lines) + "\n"
+
+    def _on_similar_md_clicked(self) -> None:
+        md = self._build_similar_md()
+        if not md:
+            QMessageBox.information(self, self.tr_("app_title"),
+                                    self.tr_("mentions_similar_md_empty"))
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, self.tr_("mentions_similar_md_btn"), "similar_mentions.md",
+            "Markdown (*.md)")
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(md)
+        except OSError as exc:
+            QMessageBox.warning(self, self.tr_("app_title"), friendly_os_error(exc))
+            return
+        QMessageBox.information(self, self.tr_("app_title"), self.tr_("md_saved", path=path))
 
     @staticmethod
     def _column_title(ch: dict) -> str:
@@ -1429,7 +1537,7 @@ class MentionsView(QWidget):
                                   text, names, links, col.get("link_classes")))
             text_lbl.setTextFormat(Qt.TextFormat.RichText)
             text_lbl.setWordWrap(True)
-            text_lbl.setStyleSheet("font-size: 12px;")
+            text_lbl.setStyleSheet(f"font-size: {fs(12)}px;")
             text_lbl.linkActivated.connect(self._open_external_link)
             table.setCellWidget(i, 3, text_lbl)
         table.resizeRowsToContents()
@@ -1519,12 +1627,12 @@ class MentionsView(QWidget):
         lay.setContentsMargins(2, 2, 2, 2)
         lay.setSpacing(2)
         type_lbl = QLabel(_format_media_type(post))
-        type_lbl.setStyleSheet("font-size: 12px;")
+        type_lbl.setStyleSheet(f"font-size: {fs(12)}px;")
         lay.addWidget(type_lbl)
         if names:
             tg_links = name_tg_links(names, normalize_links(post.get("links")))
             btn = QPushButton(self.tr_("mentions_link_btn"))
-            style = "padding: 0px 6px; font-size: 12px;"
+            style = f"padding: 0px 6px; font-size: {fs(12)}px;"
             if len(names) == 1:
                 name = names[0]
                 tg_url = tg_links.get(name)
@@ -1543,7 +1651,7 @@ class MentionsView(QWidget):
             lay.addWidget(btn)
         else:
             btn = QPushButton(self.tr_("mentions_mark_btn"))
-            btn.setStyleSheet("padding: 0px 6px; font-size: 12px;")
+            btn.setStyleSheet(f"padding: 0px 6px; font-size: {fs(12)}px;")
             btn.setToolTip(self.tr_("mentions_mark_hint"))
             btn.clicked.connect(lambda _=False, b=btn: self._on_link_clicked("", b))
             lay.addWidget(btn)
@@ -1607,7 +1715,7 @@ class MentionsView(QWidget):
         row = self.mentions_store.find_row(name)
         if row is not None:
             lbl = QLabel(f"✓ {row['id']}")
-            lbl.setStyleSheet("color: #22C55E; font-size: 12px;")
+            lbl.setStyleSheet(f"color: #22C55E; font-size: {fs(12)}px;")
             return lbl
         link_style = self._FOUND_PILL_STYLE
         if tg_url:
@@ -1622,7 +1730,7 @@ class MentionsView(QWidget):
         lbl = QLabel(html_text)
         lbl.setTextFormat(Qt.TextFormat.RichText)
         lbl.setWordWrap(True)
-        lbl.setStyleSheet("font-size: 12px;")
+        lbl.setStyleSheet(f"font-size: {fs(12)}px;")
         lbl.linkActivated.connect(
             lambda href, n=name, w=lbl, u=tg_url: self._on_found_link_activated(href, n, w, u))
         lbl.linkHovered.connect(
@@ -1668,7 +1776,7 @@ class MentionsView(QWidget):
         lbl = QLabel(html_text)
         lbl.setTextFormat(Qt.TextFormat.RichText)
         lbl.setWordWrap(True)
-        lbl.setStyleSheet("font-size: 12px;")
+        lbl.setStyleSheet(f"font-size: {fs(12)}px;")
         lbl.linkActivated.connect(self._open_external_link)
         lbl.linkHovered.connect(
             lambda url, w=lbl: w.setToolTip(_thumb_tooltip(url, url) if url else ""))

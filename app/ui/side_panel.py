@@ -10,7 +10,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QButtonGroup, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
-    QScrollArea, QStackedLayout, QVBoxLayout, QWidget,
+    QScrollArea, QVBoxLayout, QWidget,
 )
 
 from ..folders import FolderStore
@@ -21,7 +21,7 @@ from .compare.compare_view import MAX_COMPARE
 from .compare.mentions_view import MAX_MENTIONS_COMPARE
 from .dashboard_view import short_num
 from .folder_dialog import FolderManagerDialog
-from .theme import COLORS
+from .theme import COLORS, fs, zoom_extra
 from .widgets import NavButton, folder_icon, hline
 
 _FOLDER_BADGE_LEN = 2
@@ -50,7 +50,7 @@ class SidePanel(QFrame):
         super().__init__(parent)
         self.i18n = i18n
         self.setObjectName("sidebar")
-        self.setFixedWidth(256)
+        self.setFixedWidth(256 + zoom_extra(12))   # wider at Large zoom, so names/nav labels don't clip
         self.compare_mode = False
         self.compare_charts_mode = False
         self.compare_mentions_mode = False
@@ -67,33 +67,28 @@ class SidePanel(QFrame):
         self.sort_by_folder = False
         self._last_channels: list[dict] = []
 
-        # Root is a StackAll QStackedLayout — same overlay technique as
-        # CompareView's "Save MD" button — so the version tag can float in
-        # the top-left corner (over the blank strip above the brand row)
-        # without spending a row of its own in the real layout, leaving that
-        # height for the channel list below.
-        outer_stack = QStackedLayout(self)
-        outer_stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
-
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
         content = QWidget()
+        outer.addWidget(content)
         root = QVBoxLayout(content)
-        root.setContentsMargins(16, 22, 16, 18)
+        root.setContentsMargins(16, 10, 16, 18)
         root.setSpacing(0)
 
-        brand_row = QHBoxLayout()
-        brand = QLabel()
-        brand.setObjectName("brand")
-        brand.setText(f"TG&nbsp;Channel<span style='color:{COLORS['accent']};'> Stats</span>")
-        brand.setTextFormat(Qt.TextFormat.RichText)
-        brand_row.addWidget(brand, 1)
+        # One slim header row instead of the old brand title: the version tag
+        # on the left, the fold button on the right.
+        header_row = QHBoxLayout()
+        version_lbl = QLabel(f"v{__version__}")
+        version_lbl.setStyleSheet(f"color: {COLORS['faint']}; font-size: {fs(10)}px;")
+        header_row.addWidget(version_lbl, 1)
         self.fold_btn = QPushButton("◀")
         self.fold_btn.setObjectName("ghost")
         self.fold_btn.setMinimumWidth(28)
         self.fold_btn.setToolTip(i18n.tr("nav_fold_hint"))
         self.fold_btn.clicked.connect(lambda: self.fold_requested.emit())
-        brand_row.addWidget(self.fold_btn)
-        root.addLayout(brand_row)
-        root.addSpacing(10)
+        header_row.addWidget(self.fold_btn)
+        root.addLayout(header_row)
+        root.addSpacing(8)
 
         self.group = QButtonGroup(self)
         self.group.setExclusive(True)
@@ -168,7 +163,7 @@ class SidePanel(QFrame):
         self.compare_charts_btn = QPushButton(i18n.tr("nav_compare_charts"))
         self.compare_charts_btn.setObjectName("ghost")
         self.compare_charts_btn.setCheckable(True)
-        self.compare_charts_btn.setStyleSheet("padding: 4px 8px; font-size: 13px;")
+        self.compare_charts_btn.setStyleSheet(f"padding: 4px 8px; font-size: {fs(13)}px;")
         self.compare_charts_btn.setToolTip(i18n.tr("nav_compare_charts_hint"))
         self.compare_charts_btn.toggled.connect(self._toggle_compare_charts_mode)
         compare_row.addWidget(self.compare_charts_btn, 1)
@@ -176,7 +171,7 @@ class SidePanel(QFrame):
         self.compare_btn = QPushButton(i18n.tr("nav_compare"))
         self.compare_btn.setObjectName("ghost")
         self.compare_btn.setCheckable(True)
-        self.compare_btn.setStyleSheet("padding: 4px 8px; font-size: 13px;")
+        self.compare_btn.setStyleSheet(f"padding: 4px 8px; font-size: {fs(13)}px;")
         self.compare_btn.setToolTip(i18n.tr("nav_compare_hint"))
         self.compare_btn.toggled.connect(self._toggle_compare_mode)
         compare_row.addWidget(self.compare_btn, 1)
@@ -184,7 +179,7 @@ class SidePanel(QFrame):
         self.mentions_btn = QPushButton(i18n.tr("nav_mentions"))
         self.mentions_btn.setObjectName("ghost")
         self.mentions_btn.setCheckable(True)
-        self.mentions_btn.setStyleSheet("padding: 4px 8px; font-size: 13px;")
+        self.mentions_btn.setStyleSheet(f"padding: 4px 8px; font-size: {fs(13)}px;")
         self.mentions_btn.setToolTip(i18n.tr("nav_mentions_hint"))
         self.mentions_btn.toggled.connect(self._toggle_compare_mentions_mode)
         compare_row.addWidget(self.mentions_btn, 1)
@@ -224,21 +219,6 @@ class SidePanel(QFrame):
 
         self._channel_btns: dict[str, NavButton] = {}
 
-        outer_stack.addWidget(content)
-
-        # Overlay layer for the version tag — WA_TransparentForMouseEvents on
-        # the *container* (not the label) so clicks/scrolling on the real
-        # content underneath keep working everywhere outside its own small
-        # rect (same technique as CompareView's "Save MD" overlay).
-        overlay = QWidget()
-        overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        overlay_lay = QVBoxLayout(overlay)
-        overlay_lay.setContentsMargins(16, 4, 0, 0)
-        overlay_lay.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        version_lbl = QLabel(f"v{__version__}")
-        version_lbl.setStyleSheet(f"color: {COLORS['faint']}; font-size: 10px;")
-        overlay_lay.addWidget(version_lbl)
-        outer_stack.addWidget(overlay)
 
     # ------------------------------------------------------------ rebuild
     def set_channels(self, channels: list[dict]) -> None:

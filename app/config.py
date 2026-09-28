@@ -20,11 +20,12 @@ FIELDS = [
     "API_ID",
     "API_HASH",
     "PHONE_NUMBER",
+    "PHONE_NUMBER_2",   # optional second account — see AccountStore / Lean Refresh
     "CHANNEL_ID",   # last channel typed into the fetch box (convenience only)
 ]
 
 # Only these are shown on the Config view's connection form.
-CONN_FIELDS = ["API_ID", "API_HASH", "PHONE_NUMBER"]
+CONN_FIELDS = ["API_ID", "API_HASH", "PHONE_NUMBER", "PHONE_NUMBER_2"]
 
 EMPTY_PROFILE = {f: "" for f in FIELDS}
 
@@ -109,12 +110,30 @@ class Config:
         return True
 
     # ------------------------------------------------------------ paths
-    def session_path(self) -> str:
+    def session_path(self, account: int = 1) -> str:
+        """Telethon session file for the profile's first (default) or second
+        account. The "." can't occur in `safe` (it's stripped to "_"), so
+        the second account's file never collides with another profile's."""
         d = config_dir() / "sessions"
         d.mkdir(parents=True, exist_ok=True)
         safe = "".join(c if c.isalnum() or c in "-_" else "_"
                        for c in self.current_profile)
-        return str(d / f"{safe}")
+        return str(d / (safe if account == 1 else f"{safe}.acct{account}"))
+
+    def has_second_account(self) -> bool:
+        return bool(self.get("PHONE_NUMBER_2").strip())
+
+    def conn(self, account: int = 1) -> dict:
+        """Connection dict for app.worker.ToolWorker. Both accounts share the
+        profile's API_ID/API_HASH (one Telegram app can serve any number of
+        accounts); only the phone and the session file differ."""
+        phone_key = "PHONE_NUMBER" if account == 1 else "PHONE_NUMBER_2"
+        return {
+            "api_id": self.get("API_ID").strip(),
+            "api_hash": self.get("API_HASH").strip(),
+            "phone": self.get(phone_key).strip(),
+            "session": self.session_path(account),
+        }
 
     # ------------------------------------------------------------- .env io
     def import_env(self, path: str) -> int:

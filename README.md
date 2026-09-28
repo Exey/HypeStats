@@ -837,7 +837,7 @@ components are a plain weighted sum in `[0, 1]`:
 
 The MPR Pairs table (UI card and Markdown export) lists **every pair scoring
 `MUTUAL_PR_MIN_SCORE` (0.51) or higher, best first, capped at
-`MUTUAL_PR_MAX_PAIRS` (500)** — the low floor just keeps the ranked tail
+`MUTUAL_PR_MAX_PAIRS` (1000)** — the low floor just keeps the ranked tail
 available; the cap is what bounds the table. Two more cuts, both by
 default: any pair `exclude_keys` names (dropped before scoring even runs)
 never appears at all, and once ranked, `max_per_channel`

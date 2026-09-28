@@ -514,6 +514,29 @@ EN = {
     "field_API_ID": "API_ID",
     "field_API_HASH": "API_HASH",
     "field_PHONE_NUMBER": "PHONE_NUMBER",
+    "field_PHONE_NUMBER_2": "PHONE_NUMBER_2 (second account, optional)",
+    "missing_conn_2": "Some of these channels are set to the second account — "
+                      "fill in PHONE_NUMBER_2 under Config → Telegram first.",
+    "qr_login_button_2": "🔳 QR login (2nd account)",
+    "qr_login_button_2_hint": "Authorize the second account's session by QR "
+                              "code. Not required: the first Lean refresh "
+                              "that needs it will ask for the phone code.",
+    "check_login_not_authorized_2": "❌ Not logged in — use QR login (2nd "
+                                    "account), or just run a Lean refresh: "
+                                    "it will ask for the code.",
+    "lean_refresh_col_account": "2nd account",
+    "lean_refresh_col_account_hint": "Tick to fetch this channel with the "
+                                     "second Telegram account "
+                                     "(PHONE_NUMBER_2) instead of the first "
+                                     "— for channels only that account has "
+                                     "joined. Saved as you tick.",
+    "lean_refresh_account_help": "Channels ticked in the 2nd account column "
+                                 "are fetched with the second Telegram "
+                                 "account, one account after the other. "
+                                 "Shift-click a checkbox to tick or untick "
+                                 "the whole range since the last one you "
+                                 "clicked.",
+    "lean_refresh_account_log": "── Account {account}: {count} channel(s) ──",
     "config_location": "Config file: {path}",
     "instructions_title": "📖 How to get API_ID and API_HASH",
     "instructions_text": (
@@ -700,10 +723,13 @@ EN = {
     "ad_tile_cpf_sub": "list price {price}",
     "ad_tile_slots": "Ad placements",
     "ad_tile_slots_sub": "{prime} in a prime era",
+    "ad_own_card_title": "Your channel",
+    "ad_own_card_sub": "target +{target} · plan ≈ +{expected}",
     "ad_posts_title": "Best posts to repost",
     "ad_posts_hint": "Your top {n} posts by Quality — repost them into the "
-                     "channels below, or lift their media for the ad creative. "
-                     "Thumbnails appear once fetched in High-Quality Posts.",
+                     "channels below, or lift their media for the ad creative "
+                     "(text-only posts are skipped). Use Fetch media for "
+                     "previews.",
     "ad_posts_empty": "This channel has no scored posts yet (ad-button posts "
                       "and reposts don't count).",
     "ad_post_rank": "#{n} · Quality {gauge}/1000",
@@ -743,6 +769,10 @@ EN = {
                    "with {names} instead of paying (see Mutual PR).",
     "ad_rec_own_missing": "💡 Enter your channel to get your 3 best posts to "
                           "repost and prefer channels in your niche.",
+    "ad_text_btn": "Text",
+    "ad_text_title": "Ad campaign plan",
+    "ad_text_own": "{channel} plan: {current} → {target}",
+    "ad_text_no_own": "Plan: +{target} followers",
     "ad_gantt_title": "Ad timeline",
     "ad_gantt_hint": "Block width is the placement period. Click a block to "
                      "replace its channel — some channels don't sell ads.",
@@ -1290,6 +1320,29 @@ RU = {
     "field_API_ID": "API_ID",
     "field_API_HASH": "API_HASH",
     "field_PHONE_NUMBER": "PHONE_NUMBER",
+    "field_PHONE_NUMBER_2": "PHONE_NUMBER_2 (второй аккаунт, необязательно)",
+    "missing_conn_2": "Часть этих каналов назначена второму аккаунту — "
+                      "сначала заполните PHONE_NUMBER_2 в Config → Telegram.",
+    "qr_login_button_2": "🔳 Вход по QR (2-й аккаунт)",
+    "qr_login_button_2_hint": "Авторизовать сессию второго аккаунта по "
+                              "QR-коду. Необязательно: первое лёгкое "
+                              "обновление, которому он нужен, запросит код "
+                              "из Telegram.",
+    "check_login_not_authorized_2": "❌ Не выполнен вход — используйте QR "
+                                    "(2-й аккаунт) или просто запустите "
+                                    "лёгкое обновление: оно запросит код.",
+    "lean_refresh_col_account": "2-й аккаунт",
+    "lean_refresh_col_account_hint": "Отметьте, чтобы загружать этот канал "
+                                     "вторым аккаунтом Telegram "
+                                     "(PHONE_NUMBER_2), а не первым — для "
+                                     "каналов, в которых состоит только он. "
+                                     "Сохраняется сразу.",
+    "lean_refresh_account_help": "Каналы, отмеченные в колонке «2-й "
+                                 "аккаунт», загружаются вторым аккаунтом "
+                                 "Telegram — аккаунты по очереди. Shift+клик по галочке "
+                                 "отмечает или снимает весь диапазон от "
+                                 "предыдущей отмеченной.",
+    "lean_refresh_account_log": "── Аккаунт {account}: каналов — {count} ──",
     "config_location": "Файл настроек: {path}",
     "instructions_title": "📖 Как получить API_ID и API_HASH",
     "instructions_text": (
@@ -1442,7 +1495,7 @@ RU = {
     "ad_title": "Рекламная кампания",
     "ad_sub": "Планирование платных размещений в отслеживаемых каналах под "
               "цель по подписчикам — цена по формуле рекламного прайса, "
-              "время — в «горячую» пору каждого канала.",
+              "время — в прайм эру каждого канала.",
     "ad_hint": "Цена размещения — прогноз прироста из Взаимопиара за период × "
                "ваша цена за подписчика (+10% у каналов в папке Models). "
                "Ожидаемый прирост дополнительно учитывает текущий разгон "
@@ -1471,12 +1524,14 @@ RU = {
     "ad_tile_cpf": "Цена подписчика",
     "ad_tile_cpf_sub": "по прайсу {price}",
     "ad_tile_slots": "Размещений",
-    "ad_tile_slots_sub": "в «горячую» пору: {prime}",
+    "ad_tile_slots_sub": "в прайм эре: {prime}",
+    "ad_own_card_title": "Ваш канал",
+    "ad_own_card_sub": "цель +{target} · план ≈ +{expected}",
     "ad_posts_title": "Лучшие посты для репоста",
-    "ad_posts_hint": "Ваши {n} лучших поста по Качеству — репостите их в "
-                     "каналы ниже или берите из них медиа для креатива. "
-                     "Превью появятся после загрузки в «Качественных "
-                     "постах».",
+    "ad_posts_hint": "Ваши {n} лучших постов по Качеству — репостите их в "
+                     "каналы ниже или берите из них медиа для креатива "
+                     "(посты без медиа пропускаются). Превью — кнопкой "
+                     "«Загрузить медиа».",
     "ad_posts_empty": "В этом канале пока нет оценённых постов (посты с "
                       "кнопкой и репосты не учитываются).",
     "ad_post_rank": "№{n} · Качество {gauge}/1000",
@@ -1498,13 +1553,13 @@ RU = {
                            "{need_budget} (+{extra_budget}) по ≈ {cpf} за "
                            "подписчика — или снизьте цель, или удлините "
                            "период.",
-    "ad_rec_prime_top": "🔥 {count} из {total} размещений — в «горячую» пору "
+    "ad_rec_prime_top": "🔥 {count} из {total} размещений — в прайм эре "
                         "канала (охват поста выше обычного): {names}. Их "
                         "по-прежнему продают по старой, более низкой цене.",
     "ad_rec_prime_item": "{label} ({gain} охвата поста)",
-    "ad_rec_prime_item_since": "{label} ({gain} охвата поста, в ударе с {since})",
+    "ad_rec_prime_item_since": "{label} ({gain} охвата поста, в прайм эре с {since})",
     "ad_rec_no_prime": "Ни одно из {total} размещений сейчас не попадает в "
-                       "«горячую» пору — выбраны просто самые выгодные "
+                       "прайм эру — выбраны просто самые выгодные "
                        "каналы.",
     "ad_rec_timing": "🗓 Первая реклама выходит {first} в {first_label}, "
                      "последняя заканчивается {last_end}. Каждая стоит в "
@@ -1517,13 +1572,17 @@ RU = {
                    "Взаимопиар).",
     "ad_rec_own_missing": "💡 Укажите свой канал — получите 3 лучших поста "
                           "для репоста и предпочтение каналам вашей ниши.",
+    "ad_text_btn": "Текст",
+    "ad_text_title": "План рекламной кампании",
+    "ad_text_own": "{channel} план: {current} → {target}",
+    "ad_text_no_own": "План: +{target} подписчиков",
     "ad_gantt_title": "График рекламы",
     "ad_gantt_hint": "Ширина блока — период размещения. Нажмите на блок, "
                      "чтобы заменить канал — не все каналы продают рекламу.",
     "ad_gantt_empty": "Нечего показать — измените цель, бюджет или период.",
     "ad_excluded_reset": "Исключено: {count} — сбросить",
     "ad_legend_title": "Динамика канала:",
-    "ad_state_prime": "Горячая пора",
+    "ad_state_prime": "Прайм эра",
     "ad_state_warm": "Набирает ход",
     "ad_state_steady": "Ровно",
     "ad_state_cooling": "Остывает",
@@ -1545,7 +1604,7 @@ RU = {
     "ad_tip_expected": "Ожидается ≈ +{expected} подписчиков · {state} {score}/100",
     "ad_tip_pulse": "Последние {recent} мес. к медиане за {window} мес.: охват поста {reach}, вовлечённость {eng}{era}",
     "ad_tip_pulse_unknown": "Мало помесячной истории, чтобы оценить разгон.",
-    "ad_tip_era": " · в ударе с {since} ({months} мес.)",
+    "ad_tip_era": " · прайм эра с {since} ({months} мес.)",
 }
 
 LANGS = {"en": EN, "ru": RU}

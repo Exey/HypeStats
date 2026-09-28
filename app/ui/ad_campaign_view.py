@@ -3,11 +3,12 @@ paid ad placements across the channels this app tracks.
 
 Top to bottom: one row of inputs (target followers, period, budget +
 currency, price per follower, optionally *your* channel); a tile strip with
-what the plan costs and is expected to bring; if your channel is tracked,
-its three best posts by Quality (the ones to repost into partner channels or
-lift media from); the recommendations for actually reaching the target; and
+what the plan costs and is expected to bring; if your channel is tracked, a
+card with its followers now -> after the plan beside its five best posts
+by Quality (the ones to repost into partner channels or lift media from);
 the ad timeline — a Gantt with one block per placement, its width the
-placement's period. Click a block to swap in another channel, or to mark the
+placement's period; and, below it, the recommendations for actually
+reaching the target. Click a block to swap in another channel, or to mark the
 channel as not selling ads (it is replaced and excluded from later plans).
 
 All the maths — the ad-list price formula, prime-era detection, the planner —
@@ -18,13 +19,14 @@ place until the next input change. Excluded channels persist until reset.
 """
 from __future__ import annotations
 
+import html
 from datetime import date, timedelta
 
 from PySide6.QtCore import QDate, QLocale, QPoint, Qt, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QFont, QFontMetrics, QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QDateEdit, QDoubleSpinBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QMenu, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
+    QMenu, QMessageBox, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from .. import ad_campaign as ac
@@ -32,13 +34,15 @@ from ..folders import FolderStore
 from ..media_cache import thumbnail_path
 from ..scoring import score_tooltip
 from ..store import ChannelStore
+from ..tools.media_fetch import run_thumbnail_cache
+from ..worker import ToolWorker
 from .ad_gantt import STATE_COLOR_KEYS, AdGanttChart
-from .dashboard_view import build_post_link, fmt_int
-from .theme import COLORS
+from .dashboard_view import ChannelReportDialog, build_post_link, fmt_int
+from .theme import COLORS, fs
 from .widgets import (
     POST_CARD_PLACEHOLDERS, POST_CARD_TEXT_LINES, POST_CARD_TEXT_PIXEL_SIZE,
     POST_CARD_TEXT_WIDTH, POST_CARD_THUMB_HEIGHT, POST_CARD_WIDTH, PostCard,
-    SectionCard, StatCard, elide_to_lines, hline,
+    SectionCard, StatCard, elide_to_lines, hline, open_external_link,
 )
 
 _MAX_TARGET = 100_000_000
@@ -47,7 +51,13 @@ _MAX_UNTIL_DAYS = 365
 _DEFAULT_UNTIL_DAYS = 21
 _DEFAULT_CURRENCY = "₽"
 _REPLAN_DELAY_MS = 250
-_TOP_POSTS = 3
+_TOP_POSTS = 5
+_POST_GAP = 14
+_OWN_CARD_MIN_WIDTH = 210
+_OWN_CARD_MAX_WIDTH = 340
+_OWN_CARD_MARGINS = 40   # StatCard's own left+right content margins, with slack
+_OWN_VALUE_PX = 26       # QLabel#statValue's size (theme.py), before zoom
+_OWN_VALUE_MIN_PX = 12
 _MAX_ALTERNATIVES = 12
 _STATE_ICONS = {"prime": "🔥", "warm": "📈", "steady": "➖", "cooling": "❄️", "unknown": "❔"}
 _MEDIA_TIP_TYPES = ("photo", "video", "video_note")
@@ -55,12 +65,13 @@ _MEDIA_TIP_TYPES = ("photo", "video", "video_note")
 
 class AdCampaignView(QWidget):
     def __init__(self, i18n, folder_store: FolderStore, channel_store: ChannelStore,
-                 tag_store=None, parent=None) -> None:
+                 tag_store=None, cfg=None, parent=None) -> None:
         super().__init__(parent)
         self.i18n = i18n
         self.folder_store = folder_store
         self.channel_store = channel_store
         self.tag_store = tag_store
+        self.cfg = cfg
 
         self._dirty = True                  # needs _reload() on next show
         self._summaries: list[dict] = []    # ChannelStore.list()
@@ -73,6 +84,9 @@ class AdCampaignView(QWidget):
         self._window_start = date.today()
         self._window_days = ac.PERIOD_TWO_WEEKS
         self._post_widgets: list[QWidget] = []
+        self._post_cols = 0
+        self._own_entries: list[dict] = []   # best posts currently shown
+        self._media_worker: ToolWorker | None = None
 
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -126,8 +140,8 @@ class AdCampaignView(QWidget):
 
         page.addLayout(self._tiles_row())
         page.addWidget(self._posts_card())
-        page.addWidget(self._recs_card())
         page.addWidget(self._gantt_card())
+        page.addWidget(self._recs_card())
         page.addStretch(1)
         self.page_scroll.setWidget(holder)
         self._retranslate_static()
@@ -242,9 +256,24 @@ class AdCampaignView(QWidget):
         self.posts_hint_lbl.setObjectName("hint")
         self.posts_hint_lbl.setWordWrap(True)
         self.posts_card.body.addWidget(self.posts_hint_lbl)
+        # [your-channel stats card | grid of post cards that wraps to the width]
         self.posts_row = QHBoxLayout()
-        self.posts_row.setSpacing(14)
+        self.posts_row.setSpacing(_POST_GAP)
+        self.own_card = StatCard("")
+        self.own_card.setFixedWidth(_OWN_CARD_MIN_WIDTH)   # resized to its number, see _fit_own_value
+        self.own_card.title_lbl.setWordWrap(True)
+        self.own_card.sub_lbl.setWordWrap(True)
+        self.posts_row.addWidget(self.own_card, 0, Qt.AlignmentFlag.AlignTop)
+        self.posts_holder = QWidget()
+        self.posts_grid = QGridLayout(self.posts_holder)
+        self.posts_grid.setContentsMargins(0, 0, 0, 0)
+        self.posts_grid.setSpacing(_POST_GAP)
+        self.posts_row.addWidget(self.posts_holder, 1)
         self.posts_card.body.addLayout(self.posts_row)
+        self.fetch_media_btn = QPushButton()
+        self.fetch_media_btn.setObjectName("ghost")
+        self.fetch_media_btn.clicked.connect(self._on_fetch_media_clicked)
+        self.posts_card.title_row.addWidget(self.fetch_media_btn)
         self.posts_card.setVisible(False)
         return self.posts_card
 
@@ -262,6 +291,10 @@ class AdCampaignView(QWidget):
         self.reset_btn.setVisible(False)
         self.reset_btn.clicked.connect(self._reset_excluded)
         self.gantt_card.title_row.addWidget(self.reset_btn)
+        self.text_btn = QPushButton()
+        self.text_btn.setObjectName("ghost")
+        self.text_btn.clicked.connect(self._show_text)
+        self.gantt_card.title_row.addWidget(self.text_btn)
 
         self.gantt_hint_lbl = QLabel()
         self.gantt_hint_lbl.setObjectName("hint")
@@ -297,10 +330,15 @@ class AdCampaignView(QWidget):
         self.tile_cpf.title_lbl.setText(tr("ad_tile_cpf"))
         self.tile_slots.title_lbl.setText(tr("ad_tile_slots"))
         self.posts_card.title_lbl.setText(tr("ad_posts_title"))
+        self.own_card.title_lbl.setText(tr("ad_own_card_title"))
+        self.fetch_media_btn.setToolTip(tr("cqi_fetch_media_hint"))
+        if self._media_worker is None:
+            self.fetch_media_btn.setText(tr("cqi_fetch_media"))
         self.posts_hint_lbl.setText(tr("ad_posts_hint", n=_TOP_POSTS))
         self.recs_card.title_lbl.setText(tr("ad_recs_title"))
         self.gantt_card.title_lbl.setText(tr("ad_gantt_title"))
         self.gantt_hint_lbl.setText(tr("ad_gantt_hint"))
+        self.text_btn.setText(tr("ad_text_btn"))
         self.legend_lbl.setText(self._legend_html())
         self.gantt.set_callbacks(
             label=lambda b: b["label"], price=lambda b: self._money(b["price"]),
@@ -430,8 +468,6 @@ class AdCampaignView(QWidget):
             w.hide()
             w.deleteLater()
         self._post_widgets = []
-        while self.posts_row.count():
-            self.posts_row.takeAt(0)
 
     def _render_posts(self) -> None:
         self._clear_posts()
@@ -440,11 +476,12 @@ class AdCampaignView(QWidget):
         if data is None:
             return
         entries = ac.best_posts(data, _TOP_POSTS)
+        self._own_entries = entries
         if not entries:
             empty = QLabel(self.tr_("ad_posts_empty"))
             empty.setObjectName("hint")
             empty.setWordWrap(True)
-            self.posts_row.addWidget(empty)
+            self.posts_grid.addWidget(empty, 0, 0)
             self._post_widgets.append(empty)
             return
         ref = ac.channel_ref(data)
@@ -473,6 +510,12 @@ class AdCampaignView(QWidget):
                 media_counts=row.get("media_counts"))
             tip_key = ("ad_post_tip_media" if (row.get("media_type") or "") in _MEDIA_TIP_TYPES
                        else "ad_post_tip_text")
+            url = build_post_link(ref, row.get("id", 0))
+            link_lbl = QLabel(f'<a href="{html.escape(url)}">'
+                              f'{html.escape(url.split("://", 1)[-1])}</a>')
+            link_lbl.setTextFormat(Qt.TextFormat.RichText)
+            link_lbl.linkActivated.connect(open_external_link)
+            link_lbl.setFixedWidth(POST_CARD_WIDTH)
             caption = QLabel(self.tr_("ad_post_rank", n=n, gauge=round(entry["gauge"]))
                              + "\n" + self.tr_(tip_key))
             caption.setObjectName("hint")
@@ -481,13 +524,80 @@ class AdCampaignView(QWidget):
             col = QVBoxLayout()
             col.setSpacing(4)
             col.addWidget(card)
+            col.addWidget(link_lbl)
             col.addWidget(caption)
             col.addStretch(1)
             wrap = QWidget()
             wrap.setLayout(col)
-            self.posts_row.addWidget(wrap)
             self._post_widgets.append(wrap)
-        self.posts_row.addStretch(1)
+        self._relayout_posts(force=True)
+
+    def _on_fetch_media_clicked(self) -> None:
+        """Download thumbnails for the shown posts — same job the
+        High-Quality Posts view's Fetch media runs."""
+        if self._own_data is None or self._media_worker is not None or self.cfg is None:
+            return
+        ref = ac.channel_ref(self._own_data)
+        posts = [{"channel": ref, "id": e["row"].get("id", 0),
+                  "ids": e["row"].get("ids") or [e["row"].get("id", 0)]}
+                 for e in self._own_entries
+                 if not thumbnail_path(ref, e["row"].get("id", 0)).exists()]
+        if not posts:
+            QMessageBox.information(self, self.tr_("app_title"),
+                                    self.tr_("cqi_fetch_media_all_cached"))
+            return
+        conn = {
+            "api_id": self.cfg.get("API_ID").strip(),
+            "api_hash": self.cfg.get("API_HASH").strip(),
+            "phone": self.cfg.get("PHONE_NUMBER").strip(),
+            "session": self.cfg.session_path(),
+        }
+        if not conn["api_id"] or not conn["api_hash"]:
+            QMessageBox.information(self, self.tr_("app_title"),
+                                    self.tr_("cqi_fetch_media_need_login"))
+            return
+        self.fetch_media_btn.setEnabled(False)
+        self.fetch_media_btn.setText(self.tr_("cqi_fetch_media_running"))
+        self._media_worker = ToolWorker(run_thumbnail_cache, {"posts": posts}, conn, parent=self)
+        self._media_worker.sig_ask.connect(self._on_media_ask)
+        self._media_worker.sig_done.connect(self._on_fetch_media_done)
+        self._media_worker.start()
+
+    def _on_media_ask(self, _kind: str, _prompt: str) -> None:
+        # Needs the already-authorized session; a fresh login belongs on Config.
+        QMessageBox.information(self, self.tr_("app_title"),
+                                self.tr_("cqi_fetch_media_login_required"))
+        if self._media_worker is not None:
+            self._media_worker.request_cancel()
+
+    def _on_fetch_media_done(self, ok: bool, msg: str) -> None:
+        self.fetch_media_btn.setEnabled(True)
+        self.fetch_media_btn.setText(self.tr_("cqi_fetch_media"))
+        self._media_worker = None
+        if ok:
+            self._render_posts()   # pick up the newly cached thumbnails
+        elif msg and msg != "Login cancelled":
+            QMessageBox.warning(self, self.tr_("app_title"), msg)
+
+    def _relayout_posts(self, force: bool = False) -> None:
+        """Flow the post cards into as many columns as the row has room for."""
+        cards = [w for w in self._post_widgets if not isinstance(w, QLabel)]
+        if not cards:
+            return
+        avail = self.posts_holder.width() or 3 * (POST_CARD_WIDTH + _POST_GAP)
+        cols = max(1, (avail + _POST_GAP) // (POST_CARD_WIDTH + _POST_GAP))
+        if cols == self._post_cols and not force:
+            return
+        self._post_cols = cols
+        for i in reversed(range(self.posts_grid.count())):
+            self.posts_grid.takeAt(i)
+        for i, w in enumerate(cards):
+            self.posts_grid.addWidget(w, i // cols, i % cols, Qt.AlignmentFlag.AlignTop)
+        self.posts_grid.setColumnStretch(cols, 1)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        super().resizeEvent(event)
+        self._relayout_posts()
 
     # --------------------------------------------------------------- plan
     def _on_period_changed(self, _index: int = 0) -> None:
@@ -518,9 +628,42 @@ class AdCampaignView(QWidget):
 
     # ------------------------------------------------------------- render
     def _render(self) -> None:
+        self._render_own_card()
         self._render_tiles()
         self._render_recs()
         self._render_gantt()
+
+    def _render_own_card(self) -> None:
+        """Current followers -> current + what the plan expects, beside the target."""
+        if self._own is None:
+            return
+        current = self._own["followers"]
+        target = self.target_spin.value()
+        expected = ac.plan_totals(self._blocks, target, float(self.budget_spin.value()),
+                                  self.price_spin.value())["expected"]
+        value = f"{fmt_int(current)} → {fmt_int(current + round(expected))}"
+        self.own_card.set_value(
+            value, self.tr_("ad_own_card_sub", target=fmt_int(target),
+                            expected=fmt_int(round(expected))))
+        self._fit_own_value(value)
+
+    def _fit_own_value(self, text: str) -> None:
+        """Widen the card to fit `text` at the normal size, up to its maximum
+        width; past that, shrink the font instead so the number is never cut
+        off (a 50 000 → 51 000 channel used to lose its second number)."""
+        base = fs(_OWN_VALUE_PX)
+        font = QFont()
+        font.setPixelSize(base)
+        font.setWeight(QFont.Weight.ExtraBold)
+        need = QFontMetrics(font).horizontalAdvance(text) + _OWN_CARD_MARGINS
+        width = max(_OWN_CARD_MIN_WIDTH, min(_OWN_CARD_MAX_WIDTH, need))
+        self.own_card.setFixedWidth(width)
+        px = base
+        if need > width:
+            px = max(_OWN_VALUE_MIN_PX, int(base * (width - _OWN_CARD_MARGINS)
+                                           / (need - _OWN_CARD_MARGINS)))
+        self.own_card.value_lbl.setStyleSheet(f"font-size: {px}px;")
+        QTimer.singleShot(0, self._relayout_posts)   # the posts grid's width changed
 
     def _render_tiles(self) -> None:
         tr = self.tr_
@@ -629,6 +772,28 @@ class AdCampaignView(QWidget):
                             reach=f"{(prime['reach_gain'] - 1) * 100:+.0f}%",
                             eng=f"{(prime['engagement_gain'] - 1) * 100:+.0f}%", era=era))
         return "\n".join(lines)
+
+    def _plan_text(self) -> str:
+        """The current plan as a plain numbered list, to paste elsewhere."""
+        tr = self.tr_
+        target = self.target_spin.value()
+        lines = [tr("ad_text_title")]
+        if self._own is not None:
+            current = self._own["followers"]
+            name = ac.channel_label(self._own_data or {})
+            lines.append(tr("ad_text_own", channel=name, current=fmt_int(current),
+                            target=fmt_int(current + target)))
+        else:
+            lines.append(tr("ad_text_no_own", target=fmt_int(target)))
+        for n, b in enumerate(self._blocks, 1):
+            end = b["start"] + timedelta(b["days"] - 1)
+            lines.append(f"{n}. {b['label']} {self._fmt_day(b['start'])} - "
+                         f"{self._fmt_day(end)} +{fmt_int(round(b['expected']))}")
+        return "\n".join(lines)
+
+    def _show_text(self) -> None:
+        ChannelReportDialog(self, self.i18n, self._plan_text(),
+                            self.tr_("ad_text_title")).exec()
 
     # ------------------------------------------------------ manual edits
     def _on_block_clicked(self, index: int, pos: QPoint) -> None:

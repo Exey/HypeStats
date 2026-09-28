@@ -416,11 +416,14 @@ def best_posts(data: dict, limit: int = 3) -> list[dict]:
     """The `limit` highest-Quality posts of a channel checkpoint — the ones
     worth reposting into partner channels or lifting media from. Quality is
     the app-wide post gauge (app.scoring); posts scoring 0 (ad-button posts,
-    reposts of other channels' content) can't be recommended. Each result:
+    reposts of other channels' content) can't be recommended, and neither can
+    text-only posts — there is no media to reuse. Each result:
     {"row", "raw_score", "gauge"}."""
     avg_views = channel_avg_views(data)
     scored = []
     for row in data.get("rows", []) or []:
+        if not (row.get("media_type") or row.get("media_counts")):
+            continue
         raw = post_score_raw(row, avg_views)
         if raw > 0:
             scored.append({"row": row, "raw_score": raw,

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ..accounts import FIRST_ACCOUNT, SECOND_ACCOUNT, AccountStore
 from ..activity import channel_activity_trend
 from ..config import CONN_FIELDS, config_dir
 from ..errors import friendly_os_error
@@ -53,6 +54,29 @@ def _channel_display_name(ch: dict) -> str:
     return f"@{username}" if username else (ch.get("title") or ch.get("key", "?"))
 
 
+class _LeanTable(QTableWidget):
+    """QTableWidget that remembers the keyboard modifiers of the last click
+    or key press — a checkbox toggle surfaces only as `itemChanged`, which
+    carries no modifiers, and the Lean refresh list needs to know whether
+    Shift was held to tick a whole range (ConfigView._on_lean_item_changed)."""
+
+    def __init__(self, rows: int, cols: int, parent=None) -> None:
+        super().__init__(rows, cols, parent)
+        self.last_modifiers = Qt.KeyboardModifier.NoModifier
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        self.last_modifiers = event.modifiers()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        self.last_modifiers = event.modifiers()   # the toggle lands in here
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        self.last_modifiers = event.modifiers()
+        super().keyPressEvent(event)
+
+
 class ConfigView(QWidget):
     channel_fetched = Signal(dict)   # full channel_stat payload
     folders_changed = Signal()
@@ -64,14 +88,23 @@ class ConfigView(QWidget):
     accent_change_requested = Signal(str)  # "" (theme default) | "#RRGGBB"
 
     def __init__(self, cfg, i18n, folder_store: FolderStore, tag_store: TagStore,
-                channel_store: ChannelStore, parent=None) -> None:
+                channel_store: ChannelStore, account_store: AccountStore,
+                parent=None) -> None:
         super().__init__(parent)
         self.cfg = cfg
         self.i18n = i18n
         self.folder_store = folder_store
         self.tag_store = tag_store
         self.channel_store = channel_store
+        self.account_store = account_store
         self.worker: ToolWorker | None = None
+        # Lean-refresh groups still to run after the current one — one per
+        # Telegram account with channels assigned to it (see lean_refresh).
+        self._lean_queue: list[tuple[int, list[str]]] = []
+        self._lean_full_period: str | None = None
+        self._check_pending: list[int] = []
+        self._check_lines: list[str] = []
+        self._check_account = FIRST_ACCOUNT
         self._export_out_path: str | None = None  # set by a Mentions-export
                                                     # button click, read back
                                                     # in _finish_mentions_export
@@ -170,6 +203,10 @@ class ConfigView(QWidget):
         self.qr_btn = QPushButton(self.tr_("qr_login_button"))
         self.qr_btn.clicked.connect(self._qr_login)
         brow.addWidget(self.qr_btn)
+        self.qr2_btn = QPushButton(self.tr_("qr_login_button_2"))
+        self.qr2_btn.setToolTip(self.tr_("qr_login_button_2_hint"))
+        self.qr2_btn.clicked.connect(lambda: self._qr_login(SECOND_ACCOUNT))
+        brow.addWidget(self.qr2_btn)
         self.check_login_btn = QPushButton(self.tr_("check_login_button"))
         self.check_login_btn.clicked.connect(self._check_login)
         brow.addWidget(self.check_login_btn)
@@ -560,7 +597,8 @@ class ConfigView(QWidget):
         self._lean_sort_col = 1        # Updated
         self._lean_sort_desc = False   # oldest fetch first
 
-        self.lean_help_lbl = QLabel(self.tr_("lean_refresh_help"))
+        self.lean_help_lbl = QLabel(self.tr_("lean_refresh_help") + " "
+                                    + self.tr_("lean_refresh_account_help"))
         self.lean_help_lbl.setObjectName("hint")
         self.lean_help_lbl.setWordWrap(True)
         card.body.addWidget(self.lean_help_lbl)
@@ -638,7 +676,10 @@ class ConfigView(QWidget):
         # in the cells (see refresh_lean_list), so edit triggers stay off but
         # the check state is still user-toggleable. Clicking any other column
         # header re-sorts the list (_on_lean_header_clicked).
-        self.lean_table = QTableWidget(0, 5)
+        self.lean_table = _LeanTable(0, 6)
+        # Last ticked row per checkbox column — the anchor a Shift-click
+        # ranges from; reset whenever the list is rebuilt/re-sorted.
+        self._lean_anchor: dict[int, int | None] = {0: None, self._LEAN_ACCOUNT_COL: None}
         self._set_lean_headers()
         self.lean_table.verticalHeader().setVisible(False)
         self.lean_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -651,6 +692,8 @@ class ConfigView(QWidget):
         self.lean_table.setColumnWidth(1, 150)
         self.lean_table.setColumnWidth(3, 140)
         self.lean_table.setColumnWidth(4, 110)
+        self.lean_table.setColumnWidth(5, 96)
+        self.lean_table.itemChanged.connect(self._on_lean_item_changed)
         card.body.addWidget(self.lean_table)
 
         self.refresh_lean_list()
@@ -660,7 +703,8 @@ class ConfigView(QWidget):
     _LEAN_VISIBLE_ROWS = 20
     # Table columns that re-sort the list when their header is clicked
     # (0 is the tick box). 4 (followers) defaults to descending, the rest asc.
-    _LEAN_SORT_COLS = (1, 2, 3, 4)
+    _LEAN_SORT_COLS = (1, 2, 3, 4, 5)
+    _LEAN_ACCOUNT_COL = 5   # tick = fetch this channel with the second account
 
     def _fit_lean_table_height(self, row_count: int) -> None:
         """Lock the table to show up to _LEAN_VISIBLE_ROWS rows, scrolling
@@ -676,7 +720,37 @@ class ConfigView(QWidget):
         self.lean_table.setHorizontalHeaderLabels([
             "", self.tr_("lean_refresh_col_updated"),
             self.tr_("lean_refresh_col_channel"), self.tr_("folder_export_col_folder"),
-            self.tr_("col_followers")])
+            self.tr_("col_followers"), self.tr_("lean_refresh_col_account")])
+        header_item = self.lean_table.horizontalHeaderItem(self._LEAN_ACCOUNT_COL)
+        if header_item is not None:
+            header_item.setToolTip(self.tr_("lean_refresh_col_account_hint"))
+
+    def _on_lean_item_changed(self, item: QTableWidgetItem) -> None:
+        """A checkbox was toggled. With Shift held, every row between the
+        last ticked one in that column and this one takes this box's new
+        state (file-manager style range select). The account column also
+        saves at once — it is routing metadata (see app.accounts), not part
+        of a refresh's selection."""
+        col, row = item.column(), item.row()
+        if col not in self._lean_anchor:
+            return
+        state = item.checkState()
+        anchor = self._lean_anchor[col]
+        shift = bool(self.lean_table.last_modifiers & Qt.KeyboardModifier.ShiftModifier)
+        rows = [row]
+        if shift and anchor is not None and anchor != row:
+            rows = list(range(min(anchor, row), max(anchor, row) + 1))
+            self.lean_table.blockSignals(True)   # don't re-enter for each row
+            for r in rows:
+                other = self.lean_table.item(r, col)
+                if other is not None:
+                    other.setCheckState(state)
+            self.lean_table.blockSignals(False)
+        self._lean_anchor[col] = row
+        if col == self._LEAN_ACCOUNT_COL:
+            keys = [self.lean_table.item(r, 0).data(Qt.ItemDataRole.UserRole) for r in rows]
+            self.account_store.set_channels_account(
+                keys, SECOND_ACCOUNT if state == Qt.CheckState.Checked else FIRST_ACCOUNT)
 
     def _on_lean_header_clicked(self, col: int) -> None:
         if col not in self._LEAN_SORT_COLS:
@@ -685,7 +759,7 @@ class ConfigView(QWidget):
             self._lean_sort_desc = not self._lean_sort_desc
         else:
             self._lean_sort_col = col
-            self._lean_sort_desc = col == 4   # followers reads best high-first
+            self._lean_sort_desc = col in (4, 5)   # followers / 2nd-account-first read best high-first
         self.refresh_lean_list()
 
     def _lean_sort_value(self, ch: dict, folder: str):
@@ -696,6 +770,8 @@ class ConfigView(QWidget):
             return folder.casefold()
         if col == 4:
             return int(ch.get("members", 0) or 0)
+        if col == 5:
+            return self.account_store.account_for_channel(ch["key"])
         return ch.get("fetched_at") or ""   # col 1 (Updated); missing sorts first
 
     @staticmethod
@@ -725,8 +801,11 @@ class ConfigView(QWidget):
         rows = sorted(self.channel_store.list(),
                       key=lambda ch: self._lean_sort_value(ch, folder_of[ch["key"]]),
                       reverse=self._lean_sort_desc)
+        self.account_store.prune({ch["key"] for ch in rows})
         self.lean_empty_lbl.setVisible(not rows)
         self.lean_table.setVisible(bool(rows))
+        self.lean_table.blockSignals(True)   # itemChanged is for user ticks only
+        self._lean_anchor = dict.fromkeys(self._lean_anchor)   # rows just moved
         self.lean_table.setRowCount(len(rows))
         now = self._utcnow()
         for i, ch in enumerate(rows):
@@ -745,6 +824,15 @@ class ConfigView(QWidget):
             self.lean_table.setItem(i, 2, QTableWidgetItem(_channel_display_name(ch)))
             self.lean_table.setItem(i, 3, QTableWidgetItem(folder_of[ch["key"]]))
             self.lean_table.setItem(i, 4, QTableWidgetItem(fmt_int(ch.get("members", 0))))
+            acct = QTableWidgetItem()
+            acct.setFlags((acct.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                          | Qt.ItemFlag.ItemIsUserCheckable)
+            acct.setCheckState(
+                Qt.CheckState.Checked
+                if self.account_store.account_for_channel(ch["key"]) == SECOND_ACCOUNT
+                else Qt.CheckState.Unchecked)
+            self.lean_table.setItem(i, self._LEAN_ACCOUNT_COL, acct)
+        self.lean_table.blockSignals(False)
         hdr = self.lean_table.horizontalHeader()
         hdr.setSortIndicatorShown(self._lean_sort_col in self._LEAN_SORT_COLS)
         hdr.setSortIndicator(
@@ -862,27 +950,47 @@ class ConfigView(QWidget):
         if self.is_running():
             QMessageBox.warning(self, self.tr_("app_title"), self.tr_("worker_running"))
             return False
+        groups = self.account_store.group_by_account(keys)
+        if any(acc == SECOND_ACCOUNT for acc, _ks in groups) \
+                and not self.cfg.has_second_account():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("missing_conn_2"))
+            return False
 
         self.log_view.clear()
-        conn = {
-            "api_id": self.cfg.get("API_ID").strip(),
-            "api_hash": self.cfg.get("API_HASH").strip(),
-            "phone": self.cfg.get("PHONE_NUMBER").strip(),
-            "session": self.cfg.session_path(),
-        }
+        self._lean_queue = groups
+        self._lean_full_period = full_period
+        self._set_busy(True)
+        self.progress.setRange(0, 0)
+        self._start_next_lean_group()
+        return True
+
+    def _start_next_lean_group(self) -> None:
+        """Runs the next account's channels. Each account is its own login
+        and its own ToolWorker, one after the other — a Telegram client is
+        one account — sharing this screen's log, progress bar and Stop."""
+        account, keys = self._lean_queue.pop(0)
+        if self.cfg.has_second_account():
+            self._append_log(self.tr_("lean_refresh_account_log", account=account,
+                                      count=len(keys)))
         self.worker = ToolWorker(run_lean_refresh,
-                                 {"keys": keys, "full_period": full_period},
-                                 conn, parent=self)
+                                 {"keys": keys, "full_period": self._lean_full_period},
+                                 self.cfg.conn(account), parent=self)
         self.worker.sig_log.connect(self._append_log)
         self.worker.sig_progress.connect(self._on_progress)
         self.worker.sig_ask.connect(self._on_ask)
         self.worker.sig_done.connect(self._on_lean_refresh_done)
-        self._set_busy(True)
-        self.progress.setRange(0, 0)
         self.worker.start()
-        return True
 
     def _on_lean_refresh_done(self, ok: bool, msg: str) -> None:
+        if ok and self._lean_queue:
+            # One account done, the next one still to go: keep the screen
+            # busy, resync what was saved so far, and carry on.
+            self.worker = None
+            self.checkpoints_changed.emit()
+            self.progress.setRange(0, 0)
+            self._start_next_lean_group()
+            return
+        self._lean_queue = []
         self._set_busy(False)
         if self.progress.maximum() == 0:
             self.progress.setRange(0, 1)
@@ -1424,6 +1532,8 @@ class ConfigView(QWidget):
                 lbl.setText(self.tr_(f"field_{key}"))
         self.save_btn.setText(self.tr_("save"))
         self.qr_btn.setText(self.tr_("qr_login_button"))
+        self.qr2_btn.setText(self.tr_("qr_login_button_2"))
+        self.qr2_btn.setToolTip(self.tr_("qr_login_button_2_hint"))
         self.check_login_btn.setText(self.tr_("check_login_button"))
         self.loc_lbl.setText(self.tr_("config_location", path=str(self.cfg.path)))
         self.open_folder_btn.setText(self.tr_("open_config_folder"))
@@ -1491,7 +1601,8 @@ class ConfigView(QWidget):
         self.refresh_tags_list()
 
         self.lean_card_ref.title_lbl.setText(self.tr_("lean_refresh_title"))
-        self.lean_help_lbl.setText(self.tr_("lean_refresh_help"))
+        self.lean_help_lbl.setText(self.tr_("lean_refresh_help") + " "
+                                   + self.tr_("lean_refresh_account_help"))
         self.lean_oldest_btn.setText(self.tr_("lean_refresh_oldest_btn"))
         self.lean_oldest_btn.setToolTip(self.tr_("lean_refresh_oldest_hint"))
         self.lean_1mo_btn.setText(self.tr_("lean_refresh_1mo_btn"))
@@ -1539,34 +1650,53 @@ class ConfigView(QWidget):
                     and self.cfg.get("PHONE_NUMBER").strip())
 
     # ------------------------------------------------------------- login
-    def _qr_login(self) -> None:
+    def _qr_login(self, account: int = FIRST_ACCOUNT) -> None:
         self._store_fields()
         if not (self.cfg.get("API_ID") and self.cfg.get("API_HASH")):
             QMessageBox.warning(self, self.tr_("app_title"), self.tr_("missing_conn"))
             return
-        QrLoginDialog(self.cfg, self.i18n, self).run_and_report()
+        QrLoginDialog(self.cfg, self.i18n, self, account=account).run_and_report()
 
     def _check_login(self) -> None:
+        """Checks the stored session of the first account, then of the
+        second one too if PHONE_NUMBER_2 is set — one status line each."""
         self._store_fields()
         if not (self.cfg.get("API_ID") and self.cfg.get("API_HASH")):
             QMessageBox.warning(self, self.tr_("app_title"), self.tr_("missing_conn"))
             return
         self.check_login_btn.setEnabled(False)
         self.status.setText(self.tr_("check_login_checking"))
+        self._check_pending = [FIRST_ACCOUNT]
+        if self.cfg.has_second_account():
+            self._check_pending.append(SECOND_ACCOUNT)
+        self._check_lines = []
+        self._check_next()
+
+    def _check_next(self) -> None:
+        self._check_account = self._check_pending.pop(0)
         self._login_worker = CheckLoginWorker(
             self.cfg.get("API_ID"), self.cfg.get("API_HASH"),
-            self.cfg.session_path(), parent=self)
+            self.cfg.session_path(self._check_account), parent=self)
         self._login_worker.sig_done.connect(self._on_check_login_done)
         self._login_worker.start()
 
     def _on_check_login_done(self, ok: bool, name: str, phone: str) -> None:
-        self.check_login_btn.setEnabled(True)
         if ok:
-            self.status.setText(self.tr_("check_login_ok", name=name, phone=phone))
+            line = self.tr_("check_login_ok", name=name, phone=phone)
         elif name:
-            self.status.setText(self.tr_("done_fail", msg=name))
+            line = self.tr_("done_fail", msg=name)
+        elif self._check_account == SECOND_ACCOUNT:
+            line = self.tr_("check_login_not_authorized_2")
         else:
-            self.status.setText(self.tr_("check_login_not_authorized"))
+            line = self.tr_("check_login_not_authorized")
+        if self.cfg.has_second_account():
+            line = f"[{self._check_account}] {line}"
+        self._check_lines.append(line)
+        if self._check_pending:
+            self._check_next()
+            return
+        self.check_login_btn.setEnabled(True)
+        self.status.setText("\n".join(self._check_lines))
 
     # ---------------------------------------------------------- profiles
     def _switch_profile(self, name: str) -> None:
@@ -1678,6 +1808,7 @@ class ConfigView(QWidget):
         self.worker.start()
 
     def _on_stop(self) -> None:
+        self._lean_queue = []   # a stop ends the whole run, not just this account
         if self.worker:
             self._append_log(self.tr_("cancelled"))
             self.worker.request_cancel()
@@ -1700,6 +1831,9 @@ class ConfigView(QWidget):
         else:
             prompt = self.tr_("login_code_prompt")
             echo = QLineEdit.EchoMode.Normal
+        if self.worker and self.cfg.has_second_account():
+            # Two accounts can each need a login — say which phone is asking.
+            prompt = f"{prompt}\n{self.worker.conn.get('phone', '')}"
         text, ok = QInputDialog.getText(self, self.tr_("login_title"), prompt, echo)
         if not self.worker:
             return

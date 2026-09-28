@@ -593,7 +593,7 @@ MUTUAL_PR_SIZE_WINDOW = 2000
 # floor is intentionally low — the table is sorted best-first, so a weak
 # tail is just ignorable, and the cap is what actually bounds the size.
 MUTUAL_PR_MIN_SCORE = 0.51
-MUTUAL_PR_MAX_PAIRS = 500
+MUTUAL_PR_MAX_PAIRS = 1000
 
 # Once ranked, at most this many of any one channel's own best pairs survive
 # (see rank_mutual_pr_pairs's max_per_channel) — otherwise a channel that

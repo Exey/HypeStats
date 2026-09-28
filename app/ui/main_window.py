@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
+from ..accounts import AccountStore
 from ..config import Config, config_dir
 from ..folders import FolderStore
 from ..i18n import I18n
@@ -35,6 +36,7 @@ class MainWindow(QMainWindow):
         self.store = ChannelStore()
         self.folder_store = FolderStore()
         self.tag_store = TagStore()
+        self.account_store = AccountStore()
         self.resize(1240, 860)
         self.setMinimumSize(1040, 720)
         self._current_key: str | None = None   # None => Config screen
@@ -97,7 +99,7 @@ class MainWindow(QMainWindow):
 
         self.stack = QStackedWidget()
         self.config_view = ConfigView(self.cfg, self.i18n, self.folder_store, self.tag_store,
-                                      self.store)
+                                      self.store, self.account_store)
         self.config_view.channel_fetched.connect(self._on_channel_fetched)
         self.config_view.folders_changed.connect(self._on_folders_changed)
         self.config_view.tags_changed.connect(self._on_folders_changed)
@@ -124,7 +126,7 @@ class MainWindow(QMainWindow):
                                       self.tag_store)
         self.mentions_view = MentionsView(self.i18n)
         self.ad_campaign = AdCampaignView(self.i18n, self.folder_store, self.store,
-                                          self.tag_store)
+                                          self.tag_store, self.cfg)
         self.stack.addWidget(self.config_view)       # index 0
         self.stack.addWidget(self.dashboard)         # index 1
         self.stack.addWidget(self.compare)           # index 2

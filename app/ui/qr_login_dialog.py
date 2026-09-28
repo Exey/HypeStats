@@ -20,7 +20,7 @@ def _qr_pixmap(url: str, box_size: int = 6) -> QPixmap:
 
 
 class QrLoginDialog(QDialog):
-    def __init__(self, cfg, i18n, parent=None) -> None:
+    def __init__(self, cfg, i18n, parent=None, account: int = 1) -> None:
         super().__init__(parent)
         self.cfg = cfg
         self.i18n = i18n
@@ -48,7 +48,7 @@ class QrLoginDialog(QDialog):
         layout.addWidget(cancel_btn)
 
         self.worker = QrLoginWorker(
-            cfg.get("API_ID"), cfg.get("API_HASH"), cfg.session_path(), parent=self,
+            cfg.get("API_ID"), cfg.get("API_HASH"), cfg.session_path(account), parent=self,
         )
         self.worker.sig_qr.connect(self._on_qr)
         self.worker.sig_status.connect(self._on_status)

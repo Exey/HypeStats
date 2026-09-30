@@ -65,7 +65,7 @@ from ..folders import FolderStore
 from ..mentions import MentionsStore
 from ..rating import activity_trend_penalty
 from ..scoring_pr import (
-    ad_forecast, ad_forecast_range, best_days, channel_interest,
+    MUTUAL_PR_MAX_PAIRS, ad_forecast, ad_forecast_range, best_days, channel_interest,
     rank_mutual_pr_pairs, repeated_post_forecast,
 )
 from ..store import ChannelStore
@@ -84,6 +84,7 @@ _FORECAST_COLS = ["48h", "72h", "week", "month"]
 _WD_KEYS = ["wd_mon", "wd_tue", "wd_wed", "wd_thu", "wd_fri", "wd_sat", "wd_sun"]
 # weekday index 0=Mon..6=Sun -> emoji, grouped Mon-Tue / Wed-Thu / Fri / Sat-Sun.
 _WD_EMOJI = ["🚀", "🚀", "⚖️", "⚖️", "🎉", "☀️", "☀️"]
+_PAIRS_LIMIT_CHOICES = [500, 1000, 1500, 2000, 3000, 5000]
 _TITLE_MAX_CHARS = 24
 _TITLE_COL_WIDTH = 170
 _FOLLOWERS_COL = 0
@@ -180,6 +181,21 @@ class MutualPrView(QWidget):
         self.sub_lbl.setObjectName("pageSub")
         header.addWidget(self.sub_lbl)
         header_row.addLayout(header, 1)
+        # How many top-ranked MPR Pairs to compute/show (see
+        # app.scoring_pr.rank_mutual_pr_pairs's max_pairs) — the ranking
+        # itself never changes, this just moves where the list gets cut off,
+        # so it drives both the on-screen card and the Markdown export
+        # (_ranked_pairs is the one place both read from).
+        self.pairs_limit_lbl = QLabel(self.tr_("mutual_pr_pairs_limit_label"))
+        header_row.addWidget(self.pairs_limit_lbl, 0, Qt.AlignmentFlag.AlignTop)
+        self.pairs_limit_combo = QComboBox()
+        for n in _PAIRS_LIMIT_CHOICES:
+            self.pairs_limit_combo.addItem(fmt_int(n), n)
+        idx = self.pairs_limit_combo.findData(MUTUAL_PR_MAX_PAIRS)
+        self.pairs_limit_combo.setCurrentIndex(idx if idx >= 0 else 1)
+        self.pairs_limit_combo.setToolTip(self.tr_("mutual_pr_pairs_limit_hint"))
+        self.pairs_limit_combo.currentIndexChanged.connect(self._on_pairs_limit_changed)
+        header_row.addWidget(self.pairs_limit_combo, 0, Qt.AlignmentFlag.AlignTop)
         self.md_btn = QPushButton(self.tr_("save_md_button"))
         self.md_btn.clicked.connect(self._save_md)
         header_row.addWidget(self.md_btn, 0, Qt.AlignmentFlag.AlignTop)
@@ -639,8 +655,15 @@ class MutualPrView(QWidget):
         edges = cache.get("edges") if cache else None
         return {frozenset((e["source"], e["target"])) for e in edges or []}
 
+    def _pairs_limit(self) -> int:
+        data = self.pairs_limit_combo.currentData()
+        return int(data) if data else MUTUAL_PR_MAX_PAIRS
+
+    def _on_pairs_limit_changed(self, _index: int) -> None:
+        self._rebuild_pairs_table()
+
     def _ranked_pairs(self) -> list[dict]:
-        return rank_mutual_pr_pairs(self._pair_channels(),
+        return rank_mutual_pr_pairs(self._pair_channels(), max_pairs=self._pairs_limit(),
                                     exclude_keys=self._linked_pair_keys())
 
     def _wd_list(self, days: list[int]) -> str:
@@ -793,6 +816,8 @@ class MutualPrView(QWidget):
         self.pick_lbl.setText(self.tr_("mutual_pr_pick_folder"))
         self.empty_lbl.setText(self.tr_("mutual_pr_empty"))
         self.md_btn.setText(self.tr_("save_md_button"))
+        self.pairs_limit_lbl.setText(self.tr_("mutual_pr_pairs_limit_label"))
+        self.pairs_limit_combo.setToolTip(self.tr_("mutual_pr_pairs_limit_hint"))
         self.table_card_ref.title_lbl.setText(self.tr_("nav_mutual_pr"))
         self.links_card_ref.title_lbl.setText(self.tr_("mutual_pr_links_title"))
         self.links_hint_lbl.setText(self.tr_("mutual_pr_links_hint"))

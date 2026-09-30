@@ -110,6 +110,7 @@ class MainWindow(QMainWindow):
         self.config_view.accent_change_requested.connect(self._switch_accent)
         self.dashboard = DashboardView(self.i18n, self.folder_store, self.tag_store, self.cfg)
         self.dashboard.refetch_requested.connect(self._on_refetch)
+        self.dashboard.refetch_recent_requested.connect(self._on_refetch_recent)
         self.dashboard.remove_requested.connect(self._on_remove)
         self.dashboard.folders_changed.connect(self._on_folders_changed)
         self.dashboard.tags_changed.connect(self._on_folders_changed)
@@ -121,7 +122,9 @@ class MainWindow(QMainWindow):
                                               self.config_view.tags_card,
                                               self.config_view.mentions_export_card)
         self.compare_charts = CompareChartsView(self.i18n)
-        self.content_quality = ContentQualityView(self.i18n, self.folder_store, self.store, self.cfg)
+        self.content_quality = ContentQualityView(self.i18n, self.folder_store, self.store, self.cfg,
+                                                    self.account_store)
+        self.content_quality.checkpoints_changed.connect(self._on_checkpoints_changed)
         self.mutual_pr = MutualPrView(self.i18n, self.folder_store, self.store,
                                       self.tag_store)
         self.mentions_view = MentionsView(self.i18n)
@@ -345,6 +348,14 @@ class MainWindow(QMainWindow):
         this channel, then re-open its dashboard when it finishes."""
         self._show_config()
         if self.config_view.lean_refresh([key]):
+            self._refetch_return_key = key
+
+    def _on_refetch_recent(self, key: str) -> None:
+        """Dashboard "Refetch" on the Last 50 Posts row — re-read just the
+        newest posts, then re-open the dashboard (same return path as
+        _on_refetch)."""
+        self._show_config()
+        if self.config_view.lean_refresh([key], recent_only=True):
             self._refetch_return_key = key
 
     def _on_checkpoints_changed(self) -> None:

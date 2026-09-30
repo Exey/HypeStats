@@ -12,7 +12,7 @@ storage for a feature most people won't use every time.
 """
 from __future__ import annotations
 
-from .common import resolve_entity, retry
+from .common import check_flood, resolve_entity, retry
 from ..media_cache import thumbnail_path
 
 _BATCH = 100  # client.get_messages(ids=...) batch limit
@@ -64,6 +64,7 @@ async def run_thumbnail_cache(client, p: dict, ctx) -> str:
         try:
             entity = await resolve_entity(client, channel)
         except Exception as exc:
+            check_flood(ctx, exc)
             ctx.log(f"  {channel}: {exc}")
             done += len(to_fetch)
             ctx.progress(done, total)
@@ -105,6 +106,7 @@ async def run_thumbnail_cache(client, p: dict, ctx) -> str:
                     result = await retry(ctx, client.download_media, msg,
                                          file=str(dest), thumb=0)
                 except Exception as exc:
+                    check_flood(ctx, exc)
                     ctx.log(f"  {channel}#{mid}: {exc}")
                     continue
                 if result:

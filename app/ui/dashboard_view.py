@@ -35,6 +35,7 @@ from ..periods import period_key_label
 from ..scoring import post_gauge_value, post_score_raw, score_tooltip
 from ..store import ChannelStore
 from ..tags import TagStore
+from ..tools.channel_stat import RECENT_POOL_MIN
 from ..tools.media_fetch import run_thumbnail_cache
 from ..worker import ToolWorker
 from .charts import BarChart, MultiLineChart
@@ -50,7 +51,7 @@ MONTHS_SHORT = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 LAST_FULL_YEAR = datetime.now().year - 1
-RECENT_POSTS_COUNT = 50
+RECENT_POSTS_COUNT = RECENT_POOL_MIN   # what the stored pool always keeps — see channel_stat.select_pool
 
 _MEDIA_LOG_WIDTH = 260
 _MEDIA_LOG_PIXEL_SIZE = 12   # matches QLabel#hint's font-size in theme.py
@@ -169,6 +170,7 @@ class ChannelReportDialog(QDialog):
 
 class DashboardView(QWidget):
     refetch_requested = Signal(str)   # checkpoint key — a lean (incremental) refresh
+    refetch_recent_requested = Signal(str)   # checkpoint key — re-read just the last 50 posts
     remove_requested = Signal(str)
     folders_changed = Signal()
     tags_changed = Signal()
@@ -342,6 +344,10 @@ class DashboardView(QWidget):
         self.media_log_lbl.setObjectName("hint")
         self.media_log_lbl.setFixedWidth(_MEDIA_LOG_WIDTH)
         fetch_row.addWidget(self.media_log_lbl)
+        self.refetch_recent_btn = QPushButton(self.tr_("dash_refetch_recent"))
+        self.refetch_recent_btn.setToolTip(self.tr_("dash_refetch_recent_hint"))
+        self.refetch_recent_btn.clicked.connect(self._on_refetch_recent)
+        fetch_row.addWidget(self.refetch_recent_btn)
         self.fetch_media_btn = QPushButton(self.tr_("cqi_fetch_media"))
         self.fetch_media_btn.setToolTip(self.tr_("cqi_fetch_media_hint"))
         self.fetch_media_btn.clicked.connect(self._on_fetch_media_clicked)
@@ -437,7 +443,8 @@ class DashboardView(QWidget):
         self.fetch_media_btn.setEnabled(False)
         self.fetch_media_btn.setText(self.tr_("cqi_fetch_media_running"))
         self._set_media_log("")
-        self._media_worker = ToolWorker(run_thumbnail_cache, {"posts": posts}, conn, parent=self)
+        self._media_worker = ToolWorker(run_thumbnail_cache, {"posts": posts}, conn, parent=self,
+                                        alt_conn=self.cfg.alt_conn(1))
         self._media_worker.sig_log.connect(self._set_media_log)
         self._media_worker.sig_ask.connect(self._on_media_ask)
         self._media_worker.sig_done.connect(self._on_fetch_media_done)
@@ -1167,6 +1174,11 @@ class DashboardView(QWidget):
         if key:
             self.refetch_requested.emit(key)
 
+    def _on_refetch_recent(self) -> None:
+        key = (self._data or {}).get("key") or ""
+        if key:
+            self.refetch_recent_requested.emit(key)
+
     def _on_remove(self) -> None:
         if not self._data:
             return
@@ -1313,6 +1325,8 @@ class DashboardView(QWidget):
                                ("posts", "chart_posts")):
             self._trend_series_btns[key].setText(f"● {self.tr_(title_key)}")
         self.recent_posts_card.title_lbl.setText(self.tr_("dash_recent_posts_title"))
+        self.refetch_recent_btn.setText(self.tr_("dash_refetch_recent"))
+        self.refetch_recent_btn.setToolTip(self.tr_("dash_refetch_recent_hint"))
         if self._media_worker is None:
             self.fetch_media_btn.setText(self.tr_("cqi_fetch_media"))
         self.fetch_media_btn.setToolTip(self.tr_("cqi_fetch_media_hint"))

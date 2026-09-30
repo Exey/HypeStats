@@ -558,7 +558,8 @@ class AdCampaignView(QWidget):
             return
         self.fetch_media_btn.setEnabled(False)
         self.fetch_media_btn.setText(self.tr_("cqi_fetch_media_running"))
-        self._media_worker = ToolWorker(run_thumbnail_cache, {"posts": posts}, conn, parent=self)
+        self._media_worker = ToolWorker(run_thumbnail_cache, {"posts": posts}, conn, parent=self,
+                                        alt_conn=self.cfg.alt_conn(1))
         self._media_worker.sig_ask.connect(self._on_media_ask)
         self._media_worker.sig_done.connect(self._on_fetch_media_done)
         self._media_worker.start()

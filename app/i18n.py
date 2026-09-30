@@ -77,14 +77,6 @@ EN = {
                                       "just channels that already have a "
                                       "tag assigned (any tag).",
     "folder_export_col_ethics": "Ethics",
-    "folder_export_rating_trend_note": "_Rating is docked for a channel whose "
-                                       "year-over-year activity is slowing "
-                                       "(−20%), stalling (−33%) or abandoned "
-                                       "(−50%)._",
-    "folder_export_alltime_note": "_Ethics is computed over each channel's "
-                                  "whole parsed history; the period above only "
-                                  "scopes Rating / Views / Viral share / Post "
-                                  "Quality._",
     "folder_mentions_refresh_label": "Refresh mentions for:",
     "folder_mentions_refresh_btn": "🔗 Refresh mentions",
     "folder_mentions_refresh_hint": "Re-fetch just the links in every "
@@ -115,9 +107,6 @@ EN = {
                          "re-scan — a lean refresh only re-reads the months "
                          "since each channel was last fetched and merges them "
                          "in. Progress and log show in the Fetch panel above.",
-    "lean_refresh_oldest_btn": "Oldest 10",
-    "lean_refresh_oldest_hint": "Lean-refresh the 10 least-recently-updated "
-                                "channels.",
     "lean_refresh_1mo_btn": "1 mo+",
     "lean_refresh_1mo_hint": "Lean-refresh every channel last updated more "
                              "than a month ago.",
@@ -247,6 +236,11 @@ EN = {
                       "rate (see app.scoring_pr). Treat these as a starting "
                       "point for a conversation, not a guarantee.",
     "mutual_pr_pick_folder": "Folder:",
+    "mutual_pr_pairs_limit_label": "Pairs:",
+    "mutual_pr_pairs_limit_hint": "How many top-ranked pairs the MPR Pairs "
+                                  "card below (and its Markdown export) "
+                                  "shows before cutting off the ranking — "
+                                  "raise it to see further down the list.",
     "mutual_pr_all_channels": "All channels",
     "mutual_pr_empty": "No channels tracked yet — fetch one from the Config screen.",
     "mutual_pr_range_tooltip": "Rough range: {low}–{high} (crude uncertainty band, "
@@ -305,6 +299,18 @@ EN = {
     "cqi_fetch_media_hint": "Download a small preview image for each post "
                             "shown below (only posts without one already "
                             "cached are fetched)",
+    "cqi_refetch_btn": "🔄 Refetch",
+    "cqi_refetch_running": "Refetching…",
+    "cqi_refetch_hint": "Re-read the actual views, reposts, reactions and "
+                        "comments from Telegram for twice the Top-N posts "
+                        "(Top 250 → 500, the shown ones first, then those "
+                        "just below them), then re-rank, so a high-scoring "
+                        "post from below can move up. Posts already read in "
+                        "the last 24 hours are skipped and their slots go to "
+                        "the next ones down. Only those posts are requested, "
+                        "not whole channels.",
+    "cqi_refetch_all_fresh": "Every post in range was already refetched in "
+                             "the last 24 hours — nothing to update.",
     "cqi_fetch_media_need_login": "Add your Telegram API credentials on the "
                                   "Config screen first.",
     "cqi_fetch_media_all_cached": "Every post shown below already has a "
@@ -650,6 +656,11 @@ EN = {
     "chart_by_hour": "Posts by hour of day",
     "chart_by_weekday": "Posts by day of week",
     "dash_recent_posts_title": "Last 50 Posts",
+    "dash_refetch_recent": "🔄 Refetch",
+    "dash_refetch_recent_hint": "Re-read this channel's 50 newest posts from "
+                                "Telegram into the stored post pool — fills "
+                                "gaps (a recent post missing from this row) "
+                                "without a full refresh.",
     "chart_empty": "No data",
     # weekday short labels (Mon..Sun order)
     "wd_mon": "Mon", "wd_tue": "Tue", "wd_wed": "Wed", "wd_thu": "Thu",
@@ -882,14 +893,6 @@ RU = {
                                       "до каналов, у которых уже есть "
                                       "тег (любой).",
     "folder_export_col_ethics": "Этика",
-    "folder_export_rating_trend_note": "_«Рейтинг» снижается для канала, чья "
-                                       "активность год к году замедляется "
-                                       "(−20%), затухает (−33%) или заброшена "
-                                       "(−50%)._",
-    "folder_export_alltime_note": "_«Этика» считается по всей распарсенной "
-                                  "истории канала; период выше влияет только на "
-                                  "«Рейтинг» / «Просмотры» / «Долю виральных» / "
-                                  "«Качество постов»._",
     "folder_mentions_refresh_label": "Обновить ссылки для:",
     "folder_mentions_refresh_btn": "🔗 Обновить ссылки",
     "folder_mentions_refresh_hint": "Заново получить только ссылки для "
@@ -919,9 +922,6 @@ RU = {
                          "— лёгкое обновление перечитывает только месяцы, "
                          "прошедшие с последней загрузки канала, и досливает "
                          "их. Прогресс и лог — в панели загрузки выше.",
-    "lean_refresh_oldest_btn": "Старые 10",
-    "lean_refresh_oldest_hint": "Обновить 10 каналов с самой давней датой "
-                                "обновления.",
     "lean_refresh_1mo_btn": "1 мес+",
     "lean_refresh_1mo_hint": "Обновить все каналы, не обновлявшиеся более месяца.",
     "lean_refresh_3mo_btn": "3 мес+",
@@ -1053,6 +1053,11 @@ RU = {
                       "Воспринимайте их как повод для разговора, а не как "
                       "гарантию.",
     "mutual_pr_pick_folder": "Папка:",
+    "mutual_pr_pairs_limit_label": "Пар:",
+    "mutual_pr_pairs_limit_hint": "Сколько лучших пар показывает карточка "
+                                  "«Пары ВП» ниже (и её экспорт в Markdown), "
+                                  "прежде чем обрезать список — увеличьте, "
+                                  "чтобы заглянуть дальше по рейтингу.",
     "mutual_pr_all_channels": "Все каналы",
     "mutual_pr_empty": "Пока нет отслеживаемых каналов — соберите канал на "
                        "экране настроек.",
@@ -1114,6 +1119,18 @@ RU = {
     "cqi_fetch_media_hint": "Загрузить маленькое превью для каждого поста "
                             "ниже (загружаются только те, для которых ещё "
                             "нет кэша)",
+    "cqi_refetch_btn": "🔄 Перечитать",
+    "cqi_refetch_running": "Обновление…",
+    "cqi_refetch_hint": "Заново прочитать из Telegram актуальные просмотры, "
+                        "репосты, реакции и комментарии у удвоенного Топ-N "
+                        "(Топ 250 → 500: сначала показанные, затем идущие "
+                        "сразу под ними), затем пересчитать рейтинг, чтобы "
+                        "сильный пост снизу мог подняться. Посты, "
+                        "обновлённые за последние 24 часа, пропускаются, а "
+                        "их места достаются следующим ниже. Запрашиваются "
+                        "только эти посты, а не каналы целиком.",
+    "cqi_refetch_all_fresh": "Все посты в диапазоне уже обновлялись за "
+                             "последние 24 часа — обновлять нечего.",
     "cqi_fetch_media_need_login": "Сначала добавьте данные Telegram API на "
                                   "экране настроек.",
     "cqi_fetch_media_all_cached": "У всех показанных постов уже есть "
@@ -1452,6 +1469,11 @@ RU = {
     "chart_trim_edges": "Скрыть первый/последний месяц",
     "chart_by_hour": "Посты по часам суток",
     "dash_recent_posts_title": "Последние 50 постов",
+    "dash_refetch_recent": "🔄 Перечитать",
+    "dash_refetch_recent_hint": "Заново прочитать 50 последних постов канала "
+                                "из Telegram в сохранённую выборку — "
+                                "закрывает пропуски (когда свежего поста нет "
+                                "в этой строке) без полного обновления.",
     "chart_by_weekday": "Посты по дням недели",
     "chart_empty": "Нет данных",
     "wd_mon": "Пн", "wd_tue": "Вт", "wd_wed": "Ср", "wd_thu": "Чт",

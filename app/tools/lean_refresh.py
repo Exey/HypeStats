@@ -36,10 +36,11 @@ from ..store import ChannelStore
 from .channel_stat import (
     VIRAL_BASELINE_MIN_POSTS, VIRAL_BASELINE_MONTHS, VIRAL_MONTHLY_CAP_FRAC,
     VIRAL_MULTIPLE, _channel_info, _comment_total, _extract_links, _has_buttons,
-    _is_repost, _media_type, _month_index, _one_per_month_ids, _preview,
-    _public_forwards, _reaction_total, _repost_source, _top_ids, run_channel_stat,
+    _is_repost, _media_type, _month_index, _preview,
+    RECENT_POOL_MIN, _public_forwards, _reaction_total, _repost_source,
+    run_channel_stat, select_pool, utc_stamp,
 )
-from .common import resolve_entity
+from .common import check_flood, resolve_entity
 
 _FALLBACK_GAP_DAYS = 35   # used when a checkpoint has no parseable fetched_at
 _HEARTBEAT_EVERY = 500
@@ -79,9 +80,11 @@ def _fill_month_gaps(by_label: dict[str, dict]) -> list[dict]:
     return out
 
 
-async def _scan_since(client, entity, cutoff: datetime, ctx) -> list[dict]:
-    """Album-merged posts newer than `cutoff`, each the same shape as a
-    channel_stat `rows` entry."""
+async def _scan_since(client, entity, cutoff: datetime | None, ctx,
+                      max_posts: int | None = None) -> list[dict]:
+    """Album-merged posts newer than `cutoff` (None = no date limit), each
+    the same shape as a channel_stat `rows` entry. With `max_posts`, stops
+    after that many posts (an album counts once) — newest first."""
     rows: list[dict] = []
     current: dict | None = None
     current_gid = None
@@ -90,12 +93,15 @@ async def _scan_since(client, entity, cutoff: datetime, ctx) -> list[dict]:
     async for msg in client.iter_messages(entity):
         if ctx.cancelled():
             break
-        if msg.date and msg.date < cutoff:
+        if cutoff is not None and msg.date and msg.date < cutoff:
             break  # newest -> oldest, past the window
         scanned += 1
         if getattr(msg, "action", None) is not None:
             continue  # service message
         gid = getattr(msg, "grouped_id", None)
+        if (max_posts is not None and len(rows) >= max_posts
+                and not (gid is not None and gid == current_gid)):
+            break  # the next post past the limit (not the rest of an album)
         full_text = " ".join((getattr(msg, "message", "") or "").split())
         text = _preview(full_text)
         views = int(getattr(msg, "views", 0) or 0)
@@ -141,6 +147,7 @@ async def _scan_since(client, entity, cutoff: datetime, ctx) -> list[dict]:
                 "repost_from_id": repost_from_id,
                 "repost_from_author": repost_from_author,
                 "public": None,
+                "stats_at": utc_stamp(),   # see channel_stat / stats_refresh
             }
             current_gid = gid
             rows.append(current)
@@ -169,13 +176,7 @@ def _merge(data: dict, fresh: list[dict], cutoff: datetime) -> set[int]:
         if prev and prev.get("public") and fr.get("public") is None:
             fr["public"] = prev["public"]
         by_id[fr["id"]] = fr
-    merged_rows = list(by_id.values())
-    pool_ids: set[int] = set()
-    for key in ("views", "reactions", "forwards", "ts"):
-        pool_ids |= _top_ids(merged_rows, key, top_n)
-    pool_ids |= _one_per_month_ids(merged_rows)
-    pool = [r for r in merged_rows if r["id"] in pool_ids]
-    pool.sort(key=lambda r: r["views"], reverse=True)
+    pool = select_pool(list(by_id.values()), top_n)
     data["rows"] = pool
     data["scanned"] = len(pool)
 
@@ -422,6 +423,9 @@ async def run_lean_refresh(client, p: dict, ctx) -> str:
     for i, key in enumerate(keys, 1):
         if ctx.cancelled():
             break
+        if key in ctx.done:   # finished on the previous account
+            ctx.progress(i, total)
+            continue
         data = store.load(key)
         if not data:
             ctx.progress(i, total)
@@ -432,6 +436,7 @@ async def run_lean_refresh(client, p: dict, ctx) -> str:
             result = (await _full_refresh(client, data, ctx, full_period)
                       if full_period else await _refresh_one(client, data, ctx))
         except Exception as exc:  # noqa: BLE001 - surfaced to the GUI log
+            check_flood(ctx, exc)
             ctx.log(f"  {title}: {exc}")
             ctx.progress(i, total)
             continue
@@ -439,10 +444,86 @@ async def run_lean_refresh(client, p: dict, ctx) -> str:
             break
         data.setdefault("key", key)
         store.save(data)
+        ctx.item_done(key)
         updated += 1
         ctx.log(f"  {title}: {result}.")
         ctx.progress(i, total)
 
     ctx.log(f"{'Full re-fetch' if full_period else 'Lean refresh'}: "
             f"updated {updated}/{total} channel(s).")
+    return "ok"
+
+
+async def _recent_one(client, data: dict, ctx) -> str:
+    """Re-scan just the newest RECENT_POOL_MIN posts and splice them into
+    the stored `rows` pool — for the dashboard's "Last 50 Posts" row, which
+    is drawn from that pool and so shows gaps wherever a recent post never
+    made it in (a checkpoint from before the pool always kept the last 50).
+    Only `rows` changes: the monthly series, stats and `fetched_at` are
+    deliberately left alone — a lean refresh scans from the month of
+    `fetched_at`, so bumping it here would make that skip whole months."""
+    ref = data.get("channel") or data.get("username") or data.get("key")
+    fallback_id = (data.get("info") or {}).get("id") or None
+    entity = await resolve_entity(client, ref, fallback_id)
+
+    fresh = await _scan_since(client, entity, None, ctx, max_posts=RECENT_POOL_MIN)
+    if ctx.cancelled():
+        return "cancelled"
+
+    # A fresh row replaces any stored row covering the same message ids (an
+    # album's canonical id can differ between scans), keeping public stats.
+    fresh_msg_ids = {mid for fr in fresh for mid in fr["ids"]}
+    kept = []
+    carried_public: dict[int, dict] = {}
+    for r in data.get("rows") or []:
+        overlap = fresh_msg_ids & set(r.get("ids") or [r["id"]])
+        if overlap and r.get("public"):
+            for fr in fresh:
+                if overlap & set(fr["ids"]):
+                    carried_public[fr["id"]] = r["public"]
+        if not overlap:
+            kept.append(r)
+    for fr in fresh:
+        if fr["id"] in carried_public and fr.get("public") is None:
+            fr["public"] = carried_public[fr["id"]]
+    data["rows"] = select_pool(kept + fresh, int(data.get("top_n") or 20))
+    data["scanned"] = len(data["rows"])
+    return f"{len(fresh)} recent post(s) re-read"
+
+
+async def run_recent_refresh(client, p: dict, ctx) -> str:
+    """p: {"keys": [checkpoint key, ...]} — see _recent_one."""
+    keys = p.get("keys") or []
+    store = ChannelStore()
+    total = len(keys)
+    ctx.log(f"Refetch last {RECENT_POOL_MIN} posts: {total} channel(s)…")
+    updated = 0
+    for i, key in enumerate(keys, 1):
+        if ctx.cancelled():
+            break
+        if key in ctx.done:   # finished on the previous account
+            ctx.progress(i, total)
+            continue
+        data = store.load(key)
+        if not data:
+            ctx.progress(i, total)
+            continue
+        title = data.get("title") or key
+        ctx.log(f"[{i}/{total}] {title}…")
+        try:
+            result = await _recent_one(client, data, ctx)
+        except Exception as exc:  # noqa: BLE001 - surfaced to the GUI log
+            check_flood(ctx, exc)
+            ctx.log(f"  {title}: {exc}")
+            ctx.progress(i, total)
+            continue
+        if result == "cancelled":
+            break
+        data.setdefault("key", key)
+        store.save(data)
+        ctx.item_done(key)
+        updated += 1
+        ctx.log(f"  {title}: {result}.")
+        ctx.progress(i, total)
+    ctx.log(f"Refetch last {RECENT_POOL_MIN} posts: updated {updated}/{total} channel(s).")
     return "ok"

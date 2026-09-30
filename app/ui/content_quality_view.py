@@ -40,13 +40,14 @@ import base64
 from datetime import datetime, timezone
 from statistics import median
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QFontMetrics, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
     QLabel, QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
+from ..accounts import SECOND_ACCOUNT, AccountStore
 from ..config import Config
 from ..errors import friendly_os_error
 from ..folders import FolderStore
@@ -55,6 +56,7 @@ from ..periods import YEAR_WINDOW_OPTIONS, period_key_label, year_window_cutoff
 from ..scoring import post_gauge_value, post_score_raw, score_tooltip
 from ..store import ChannelStore
 from ..tools.media_fetch import run_thumbnail_cache
+from ..tools.stats_refresh import is_fresh, run_stats_refresh
 from ..worker import ToolWorker
 from .dashboard_view import ChannelReportDialog, build_post_link, fmt_int
 from .theme import fs
@@ -173,13 +175,17 @@ _ANOMALY_SENTINEL = -1   # tg_links_limit_combo data value for that option
 
 
 class ContentQualityView(QWidget):
+    checkpoints_changed = Signal()   # a Refetch rewrote stored post counters
+
     def __init__(self, i18n, folder_store: FolderStore, channel_store: ChannelStore,
-                 cfg: Config, parent=None) -> None:
+                 cfg: Config, account_store: AccountStore | None = None,
+                 parent=None) -> None:
         super().__init__(parent)
         self.i18n = i18n
         self.folder_store = folder_store
         self.channel_store = channel_store
         self.cfg = cfg
+        self.account_store = account_store
         self._channels: list[dict] = []
         self._post_entries: list[dict] = []
         self._cards: list[PostCard] = []
@@ -190,6 +196,11 @@ class ContentQualityView(QWidget):
         self._year_window_key = "all"
         self._year_btns: dict[str, QPushButton] = {}
         self._media_worker: ToolWorker | None = None
+        # Refetch: one job per Telegram account that has posts in scope,
+        # run one after the other (a session is one account).
+        self._refetch_worker: ToolWorker | None = None
+        self._refetch_queue: list[tuple[int, list[dict]]] = []
+        self._refetch_skipped = 0
         self._build_ui()
 
     def tr_(self, key: str, **kw) -> str:
@@ -233,6 +244,10 @@ class ContentQualityView(QWidget):
         self.media_log_lbl.setObjectName("hint")
         self.media_log_lbl.setFixedWidth(_MEDIA_LOG_WIDTH)
         header.addWidget(self.media_log_lbl)
+        self.refetch_btn = QPushButton(self.tr_("cqi_refetch_btn"))
+        self.refetch_btn.setToolTip(self.tr_("cqi_refetch_hint"))
+        self.refetch_btn.clicked.connect(self._on_refetch_clicked)
+        header.addWidget(self.refetch_btn)
         self.fetch_media_btn = QPushButton(self.tr_("cqi_fetch_media"))
         self.fetch_media_btn.setToolTip(self.tr_("cqi_fetch_media_hint"))
         self.fetch_media_btn.clicked.connect(self._on_fetch_media_clicked)
@@ -272,7 +287,7 @@ class ContentQualityView(QWidget):
         # _channel_limited_entries's anomaly-cap block.
         self.tg_links_limit_combo.addItem(self.tr_("cqi_tg_links_limit_anomaly"),
                                           _ANOMALY_SENTINEL)
-        for n in (7, 6, 5, 4, 3, 2):
+        for n in (12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2):
             self.tg_links_limit_combo.addItem(self.tr_("cqi_tg_links_limit_n", n=n), n)
         header.addWidget(self.tg_links_limit_combo)
         # Excludes posts from channels below this follower count from the
@@ -873,10 +888,137 @@ class ContentQualityView(QWidget):
         self.grid.setRowStretch(rows, 1)
         self.grid.setColumnStretch(cols, 1)
 
+    # ------------------------------------------------------------ refetch
+    def _busy(self) -> bool:
+        """A media fetch or a Refetch is running — both use the same Telegram
+        session file, so never two at once."""
+        return self._media_worker is not None or self._refetch_worker is not None
+
+    def _refetch_entries(self) -> tuple[list[dict], int]:
+        """(posts to re-read, fresh posts skipped). Walks the grid's posts,
+        then on down the raw ranking, and takes the first 2 × Top-N posts
+        that are *stale* — not read from Telegram in the last
+        stats_refresh.FRESH_HOURS. A post read recently is skipped and its
+        slot goes to the next one down, so a Top 250 always re-reads up to 500
+        posts however many were just refreshed: the extra depth is what lets a
+        high-scoring post from below overtake the shown ones.
+
+        Below the grid the walk ignores the balance rules (per-channel caps,
+        quality floor, anomaly cap) that trim it: those judge posts on the
+        very counters that are stale, so a post they cut today may belong in
+        the grid after a refresh — and on a thin period they can leave the
+        grid short of its Top-N with nothing else to show. Only the filters
+        you set by hand (hide non-media, minimum followers) still apply."""
+        shown = self._channel_limited_entries()
+        seen = {(e["channel"].get("key"), e["row"].get("id")) for e in shown}
+        hide_non_media = self.hide_non_media_chk.isChecked()
+        min_followers = int(self.min_followers_combo.currentData() or 0)
+        want = 2 * int(self.max_posts_combo.currentData() or MAX_POSTS_SHOWN)
+
+        def _ranked():
+            yield from shown
+            for entry in self._post_entries:   # best-first
+                if (entry["channel"].get("key"), entry["row"].get("id")) in seen:
+                    continue
+                if hide_non_media and not (entry["row"].get("media_type") or ""):
+                    continue
+                if min_followers and _channel_members(entry["channel"]) < min_followers:
+                    continue
+                yield entry
+
+        now = datetime.now(timezone.utc)
+        picked: list[dict] = []
+        skipped = 0
+        for entry in _ranked():
+            if len(picked) >= want:
+                break
+            if is_fresh(entry["row"], now):
+                skipped += 1
+                continue
+            picked.append(entry)
+        return picked, skipped
+
+    def _on_refetch_clicked(self) -> None:
+        """Re-read the live views / reposts / reactions / comments of the
+        posts shown plus the same number ranked just below them (e.g. 250 +
+        250): the stored counters go stale as posts age, and a refreshed
+        lower post can overtake a shown one, so the next batch down has to be
+        current for the re-ranking to be right. Only those posts are asked
+        for (see app.tools.stats_refresh), not whole channels."""
+        if self._busy():
+            return
+        entries, skipped = self._refetch_entries()
+        if not entries:
+            QMessageBox.information(
+                self, self.tr_("app_title"),
+                self.tr_("cqi_refetch_all_fresh") if skipped else self.tr_("cqi_empty_posts"))
+            return
+        if not (self.cfg.get("API_ID").strip() and self.cfg.get("API_HASH").strip()):
+            QMessageBox.information(self, self.tr_("app_title"),
+                                    self.tr_("cqi_fetch_media_need_login"))
+            return
+
+        by_channel: dict[str, dict] = {}
+        for e in entries:
+            key = e["channel"].get("key")
+            group = by_channel.setdefault(key, {"key": key, "posts": []})
+            row = e["row"]
+            group["posts"].append({"id": row.get("id", 0),
+                                   "ids": row.get("ids") or [row.get("id", 0)]})
+        groups = (self.account_store.group_by_account(list(by_channel))
+                  if self.account_store is not None else [(1, list(by_channel))])
+        if any(acc == SECOND_ACCOUNT for acc, _keys in groups) \
+                and not self.cfg.has_second_account():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("missing_conn_2"))
+            return
+        self._refetch_skipped = skipped
+        self._refetch_queue = [(acc, [by_channel[k] for k in keys]) for acc, keys in groups]
+        self.refetch_btn.setEnabled(False)
+        self.fetch_media_btn.setEnabled(False)
+        self.refetch_btn.setText(self.tr_("cqi_refetch_running"))
+        self._set_media_log("")
+        self._start_next_refetch_group()
+
+    def _start_next_refetch_group(self) -> None:
+        account, channels = self._refetch_queue.pop(0)
+        self._refetch_worker = ToolWorker(
+            run_stats_refresh,
+            {"channels": channels, "skipped_fresh": self._refetch_skipped},
+            self.cfg.conn(account), parent=self, alt_conn=self.cfg.alt_conn(account))
+        self._refetch_skipped = 0   # only the first account's job reports it
+        self._refetch_worker.sig_log.connect(self._set_media_log)
+        self._refetch_worker.sig_ask.connect(self._on_refetch_ask)
+        self._refetch_worker.sig_done.connect(self._on_refetch_done)
+        self._refetch_worker.start()
+
+    def _on_refetch_ask(self, _kind: str, _prompt: str) -> None:
+        # Same assumption as Fetch media: the session is already authorized.
+        QMessageBox.information(self, self.tr_("app_title"),
+                                self.tr_("cqi_fetch_media_login_required"))
+        self._refetch_queue = []
+        if self._refetch_worker is not None:
+            self._refetch_worker.request_cancel()
+
+    def _on_refetch_done(self, ok: bool, msg: str) -> None:
+        self._refetch_worker = None
+        if ok and self._refetch_queue:
+            self._start_next_refetch_group()
+            return
+        self._refetch_queue = []
+        self.refetch_btn.setEnabled(True)
+        self.fetch_media_btn.setEnabled(True)
+        self.refetch_btn.setText(self.tr_("cqi_refetch_btn"))
+        if not ok and msg and msg != "Login cancelled":
+            QMessageBox.warning(self, self.tr_("app_title"), msg)
+        # Channels are saved as each finishes, so even a failed/cancelled run
+        # changed data on disk — always resync; the main window reloads this
+        # view (re-ranking on the new numbers) along with every other one.
+        self.checkpoints_changed.emit()
+
     # ------------------------------------------------------- fetch media
     def _on_fetch_media_clicked(self) -> None:
         entries = self._channel_limited_entries()
-        if not entries or self._media_worker is not None:
+        if not entries or self._busy():
             return
         # Only posts that don't already have a cached thumbnail (see
         # media_cache.thumbnail_path) — media_fetch.run_thumbnail_cache
@@ -907,7 +1049,8 @@ class ContentQualityView(QWidget):
         self.fetch_media_btn.setEnabled(False)
         self.fetch_media_btn.setText(self.tr_("cqi_fetch_media_running"))
         self._set_media_log("")
-        self._media_worker = ToolWorker(run_thumbnail_cache, {"posts": posts}, conn, parent=self)
+        self._media_worker = ToolWorker(run_thumbnail_cache, {"posts": posts}, conn, parent=self,
+                                        alt_conn=self.cfg.alt_conn(1))
         self._media_worker.sig_log.connect(self._set_media_log)
         self._media_worker.sig_ask.connect(self._on_media_ask)
         self._media_worker.sig_done.connect(self._on_fetch_media_done)
@@ -966,7 +1109,9 @@ class ContentQualityView(QWidget):
             ref = _channel_ref(entry["channel"])
             counts[ref] = counts.get(ref, 0) + 1
             channel_by_ref.setdefault(ref, entry["channel"])
-        top_authors = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:TOP_AUTHORS_SHOWN]
+        top_authors = sorted(counts.items(),
+                             key=lambda kv: (kv[1], _channel_members(channel_by_ref[kv[0]])),
+                             reverse=True)[:TOP_AUTHORS_SHOWN]   # ties: bigger channel first
         if top_authors:
             lines.append(self.tr_("cqi_tg_links_top_authors_title", n=len(top_authors)))
             for i, (ref, count) in enumerate(top_authors, 1):
@@ -1017,7 +1162,11 @@ class ContentQualityView(QWidget):
             if not counts:
                 continue
             name = folder_name.get(fid, self.tr_("folder_none"))
-            top = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:FOLDER_HITMAKERS_SHOWN]
+            # Ties on post count go to the bigger channel (followers), not
+            # to whichever happened to be seen first.
+            top = sorted(counts.items(),
+                         key=lambda kv: (kv[1], _channel_members(channel_by_ref[kv[0]])),
+                         reverse=True)[:FOLDER_HITMAKERS_SHOWN]
             lines.append(self.tr_("cqi_md_hitmakers_title", n=FOLDER_HITMAKERS_SHOWN, folder=name))
             for i, (ref, count) in enumerate(top, 1):
                 label = _channel_label(channel_by_ref[ref]).replace("|", "")
@@ -1097,6 +1246,9 @@ class ContentQualityView(QWidget):
         self.fetch_media_btn.setToolTip(self.tr_("cqi_fetch_media_hint"))
         if self._media_worker is None:
             self.fetch_media_btn.setText(self.tr_("cqi_fetch_media"))
+        self.refetch_btn.setToolTip(self.tr_("cqi_refetch_hint"))
+        if self._refetch_worker is None:
+            self.refetch_btn.setText(self.tr_("cqi_refetch_btn"))
         self.tg_links_btn.setText(self.tr_("cqi_tg_links"))
         self.tg_links_btn.setToolTip(self.tr_("cqi_tg_links_hint"))
         self.export_md_btn.setText(self.tr_("cqi_export_md_btn"))

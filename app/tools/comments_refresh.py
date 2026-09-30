@@ -16,7 +16,7 @@ through.
 """
 from __future__ import annotations
 
-from .common import resolve_entity, retry
+from .common import check_flood, resolve_entity, retry
 from ..store import ChannelStore
 
 _BATCH = 100  # client.get_messages(ids=...) batch limit
@@ -49,6 +49,7 @@ async def run_comments_refresh(client, p: dict, ctx) -> str:
         try:
             entity = await resolve_entity(client, channel_ref, fallback_id)
         except Exception as exc:
+            check_flood(ctx, exc)
             ctx.log(f"  {key}: {exc}")
             ctx.progress(done, total)
             continue

@@ -120,6 +120,14 @@ class Config:
                        for c in self.current_profile)
         return str(d / (safe if account == 1 else f"{safe}.acct{account}"))
 
+    def alt_conn(self, account: int = 1) -> dict | None:
+        """The *other* account's connection dict, to fall back on when
+        `account` hits a long FloodWait — None if that account has no phone
+        set (nothing to fall back to). See app.worker.ToolWorker."""
+        other = 2 if account == 1 else 1
+        conn = self.conn(other)
+        return conn if conn["phone"] and conn["api_id"] and conn["api_hash"] else None
+
     def has_second_account(self) -> bool:
         return bool(self.get("PHONE_NUMBER_2").strip())
 

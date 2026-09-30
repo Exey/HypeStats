@@ -33,7 +33,7 @@ from ..store import ChannelStore
 from ..tags import TagStore
 from ..tools.channel_stat import run_channel_stat
 from ..tools.comments_refresh import run_comments_refresh
-from ..tools.lean_refresh import run_lean_refresh
+from ..tools.lean_refresh import run_lean_refresh, run_recent_refresh
 from ..tools.mentions_export import (
     run_fairness_calculate, run_link_report_export, run_mentions_report_export,
 )
@@ -102,6 +102,7 @@ class ConfigView(QWidget):
         # Telegram account with channels assigned to it (see lean_refresh).
         self._lean_queue: list[tuple[int, list[str]]] = []
         self._lean_full_period: str | None = None
+        self._lean_recent_only = False
         self._check_pending: list[int] = []
         self._check_lines: list[str] = []
         self._check_account = FIRST_ACCOUNT
@@ -159,7 +160,7 @@ class ConfigView(QWidget):
         # Every button that must be greyed out while a background worker runs
         # (the fetch/comments/lean jobs all share self.worker).
         self._busy_btns = [self.fetch_btn, self.refresh_mentions_btn, self.refresh_comments_btn,
-                           self.lean_oldest_btn, self.lean_1mo_btn, self.lean_3mo_btn,
+                           self.lean_1mo_btn, self.lean_3mo_btn,
                            self.lean_selected_btn, self.lean_selected_2y_btn,
                            self.lean_selected_all_btn, self.refetch_mentions_btn,
                            self.export_link_report_btn, self.export_mentions_report_btn,
@@ -192,6 +193,11 @@ class ConfigView(QWidget):
             if key == "API_HASH":
                 edit.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
             self.edits[key] = edit
+            # Persist as soon as a field is left or Enter is pressed — not
+            # only on "Save profile": the values are used by jobs (fetch,
+            # Lean refresh, login) straight from the form, so a phone typed
+            # and used without pressing Save was silently lost on restart.
+            edit.editingFinished.connect(self._autosave_fields)
             self.conn_form.addRow(self.tr_(f"field_{key}"), edit)
         card.body.addLayout(self.conn_form)
 
@@ -637,10 +643,6 @@ class ConfigView(QWidget):
         card.body.addLayout(comments_row)
 
         btn_row = QHBoxLayout()
-        self.lean_oldest_btn = QPushButton(self.tr_("lean_refresh_oldest_btn"))
-        self.lean_oldest_btn.setToolTip(self.tr_("lean_refresh_oldest_hint"))
-        self.lean_oldest_btn.clicked.connect(lambda: self._on_lean_refresh_clicked("oldest10"))
-        btn_row.addWidget(self.lean_oldest_btn)
         self.lean_1mo_btn = QPushButton(self.tr_("lean_refresh_1mo_btn"))
         self.lean_1mo_btn.setToolTip(self.tr_("lean_refresh_1mo_hint"))
         self.lean_1mo_btn.clicked.connect(lambda: self._on_lean_refresh_clicked("1mo"))
@@ -851,8 +853,6 @@ class ConfigView(QWidget):
 
     def _lean_candidates(self, mode: str) -> list[dict]:
         rows = self._lean_rows_sorted()
-        if mode == "oldest10":
-            return rows[:10]
         days = 30 if mode == "1mo" else 91
         cutoff = self._utcnow() - timedelta(days=days)
         out = []
@@ -930,7 +930,8 @@ class ConfigView(QWidget):
         # system already runs on, not a special case bolted on here.
         self.lean_refresh(keys, full_period="all")
 
-    def lean_refresh(self, keys: list[str], full_period: str | None = None) -> bool:
+    def lean_refresh(self, keys: list[str], full_period: str | None = None,
+                     recent_only: bool = False) -> bool:
         """Start a lean (incremental) refresh of `keys` — the months since
         each was last fetched, merged in (see tools.lean_refresh). Shared by
         the Config card's batch buttons and the dashboard's Refresh button.
@@ -938,8 +939,11 @@ class ConfigView(QWidget):
         "all" — deliberately not a real key, so period_cutoff() falls
         through to no cutoff at all) every key is instead fully re-scanned
         over that window — slower, but the only way to rebuild a channel's
-        older history against current per-post fields. Returns True if a
-        worker was started."""
+        older history against current per-post fields. With `recent_only`,
+        it instead re-reads just each channel's newest posts into its stored
+        pool (see tools.lean_refresh.run_recent_refresh) — the dashboard's
+        "Last 50 Posts" Refetch button. Returns True if a worker was
+        started."""
         keys = [k for k in keys if k]
         if not keys:
             return False
@@ -959,6 +963,7 @@ class ConfigView(QWidget):
         self.log_view.clear()
         self._lean_queue = groups
         self._lean_full_period = full_period
+        self._lean_recent_only = recent_only
         self._set_busy(True)
         self.progress.setRange(0, 0)
         self._start_next_lean_group()
@@ -972,9 +977,11 @@ class ConfigView(QWidget):
         if self.cfg.has_second_account():
             self._append_log(self.tr_("lean_refresh_account_log", account=account,
                                       count=len(keys)))
-        self.worker = ToolWorker(run_lean_refresh,
+        tool = run_recent_refresh if self._lean_recent_only else run_lean_refresh
+        self.worker = ToolWorker(tool,
                                  {"keys": keys, "full_period": self._lean_full_period},
-                                 self.cfg.conn(account), parent=self)
+                                 self.cfg.conn(account), parent=self,
+                                 alt_conn=self.cfg.alt_conn(account))
         self.worker.sig_log.connect(self._append_log)
         self.worker.sig_progress.connect(self._on_progress)
         self.worker.sig_ask.connect(self._on_ask)
@@ -1269,12 +1276,6 @@ class ConfigView(QWidget):
                     row += [f"{score:.3f}", fmt_int(views), f"{viral_share:.1f}%",
                             str(round(quality))]
             lines.append("| " + " | ".join(row) + " |")
-        if extra:
-            # Rating always carries the activity-trend penalty; the "Ethics
-            # is whole-history" caveat only bites when a real period is set.
-            lines += ["", self.tr_("folder_export_rating_trend_note")]
-            if mode != "all":
-                lines.append(self.tr_("folder_export_alltime_note"))
         return "\n".join(lines) + "\n"
 
     def _collect_export_metrics(self, summaries: list[dict], mode: str,
@@ -1603,8 +1604,6 @@ class ConfigView(QWidget):
         self.lean_card_ref.title_lbl.setText(self.tr_("lean_refresh_title"))
         self.lean_help_lbl.setText(self.tr_("lean_refresh_help") + " "
                                    + self.tr_("lean_refresh_account_help"))
-        self.lean_oldest_btn.setText(self.tr_("lean_refresh_oldest_btn"))
-        self.lean_oldest_btn.setToolTip(self.tr_("lean_refresh_oldest_hint"))
         self.lean_1mo_btn.setText(self.tr_("lean_refresh_1mo_btn"))
         self.lean_1mo_btn.setToolTip(self.tr_("lean_refresh_1mo_hint"))
         self.lean_3mo_btn.setText(self.tr_("lean_refresh_3mo_btn"))
@@ -1639,6 +1638,10 @@ class ConfigView(QWidget):
     def _store_fields(self) -> None:
         for key, edit in self.edits.items():
             self.cfg.profile[key] = edit.text().strip()
+
+    def _autosave_fields(self) -> None:
+        self._store_fields()
+        self.cfg.save()
 
     def _save(self) -> None:
         self._store_fields()
@@ -1797,7 +1800,8 @@ class ConfigView(QWidget):
             "phone": self.cfg.get("PHONE_NUMBER").strip(),
             "session": self.cfg.session_path(),
         }
-        self.worker = ToolWorker(run_channel_stat, params, conn, parent=self)
+        self.worker = ToolWorker(run_channel_stat, params, conn, parent=self,
+                                 alt_conn=self.cfg.alt_conn(1))
         self.worker.sig_log.connect(self._append_log)
         self.worker.sig_progress.connect(self._on_progress)
         self.worker.sig_ask.connect(self._on_ask)
@@ -1909,7 +1913,8 @@ class ConfigView(QWidget):
             "phone": self.cfg.get("PHONE_NUMBER").strip(),
             "session": self.cfg.session_path(),
         }
-        self.worker = ToolWorker(run_comments_refresh, {"keys": keys}, conn, parent=self)
+        self.worker = ToolWorker(run_comments_refresh, {"keys": keys}, conn, parent=self,
+                                 alt_conn=self.cfg.alt_conn(1))
         self.worker.sig_log.connect(self._append_log)
         self.worker.sig_progress.connect(self._on_progress)
         self.worker.sig_ask.connect(self._on_ask)
@@ -1986,7 +1991,8 @@ class ConfigView(QWidget):
             "phone": self.cfg.get("PHONE_NUMBER").strip(),
             "session": self.cfg.session_path(),
         }
-        self.worker = ToolWorker(run_mentions_refresh, {"keys": keys}, conn, parent=self)
+        self.worker = ToolWorker(run_mentions_refresh, {"keys": keys}, conn, parent=self,
+                                 alt_conn=self.cfg.alt_conn(1))
         self.worker.sig_log.connect(self._append_log)
         self.worker.sig_progress.connect(self._on_progress)
         self.worker.sig_ask.connect(self._on_ask)

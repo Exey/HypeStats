@@ -229,6 +229,34 @@ def _one_per_month_ids(rows: list[dict]) -> set[int]:
     return ids
 
 
+def utc_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# The pool always keeps at least this many of the most recent posts, however
+# small `top_n` is — the dashboard's "Last 50 Posts" row is drawn from the
+# pool, and with a top_n of 20 it silently skipped posts from a couple of
+# weeks ago (older than the 20th newest, and not a top post by any metric).
+RECENT_POOL_MIN = 50
+
+
+def select_pool(rows: list[dict], top_n: int) -> list[dict]:
+    """The stored `rows` pool: the union of the top-`top_n` by views,
+    reactions and forwards, the most recent max(top_n, RECENT_POOL_MIN)
+    posts, and the best post of every calendar month — see the pool
+    comment in run_channel_stat for why each part is there. Sorted by views,
+    best first. Shared with app.tools.lean_refresh so a merge keeps exactly
+    what a fresh fetch would."""
+    pool_ids: set[int] = set()
+    for key in ("views", "reactions", "forwards"):
+        pool_ids |= _top_ids(rows, key, top_n)
+    pool_ids |= _top_ids(rows, "ts", max(top_n, RECENT_POOL_MIN))
+    pool_ids |= _one_per_month_ids(rows)
+    pool = [r for r in rows if r["id"] in pool_ids]
+    pool.sort(key=lambda r: r["views"], reverse=True)
+    return pool
+
+
 def _trimmed_mean_drop_top(values: list[int], drop_frac: float) -> float:
     """Mean after dropping the top `drop_frac` fraction of values (sorted
     ascending) — a true trimmed mean over the *whole* distribution, not
@@ -654,6 +682,9 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
                 "repost_from_id": repost_from_id,
                 "repost_from_author": repost_from_author,
                 "public": None,
+                # When these counters were read from Telegram — lets the High-
+                # Quality Posts Refetch skip posts read within the last day.
+                "stats_at": utc_stamp(),
             }
             current_gid = gid
             current_anchor_msg = msg
@@ -750,12 +781,7 @@ async def run_channel_stat(client, p: dict, ctx) -> str:
     # Posts view, and the dashboard's "recent posts" row/Quality trend
     # line, all read from this same pool — without both of these, they'd
     # silently drop whichever recent months don't happen to stand out.
-    pool_ids: set[int] = set()
-    for key in ("views", "reactions", "forwards", "ts"):
-        pool_ids |= _top_ids(rows, key, top_n)
-    pool_ids |= _one_per_month_ids(rows)
-    pool = [r for r in rows if r["id"] in pool_ids]
-    pool.sort(key=lambda r: r["views"], reverse=True)
+    pool = select_pool(rows, top_n)
 
     if fetch_public and pool and not ctx.cancelled():
         input_channel = await client.get_input_entity(entity)

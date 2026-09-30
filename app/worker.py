@@ -21,6 +21,18 @@ class Ctx:
 
     def __init__(self, worker: "ToolWorker") -> None:
         self._w = worker
+        # Keys of items a tool has fully finished (see item_done). Lives as
+        # long as the worker, so when the job switches Telegram accounts
+        # mid-way (ToolWorker._main) and the tool is re-run, it can skip them.
+        self.done: set = set()
+
+    def item_done(self, key) -> None:
+        self.done.add(key)
+
+    def can_switch(self) -> bool:
+        """True while this job still has a second Telegram account to fall
+        back on (a long FloodWait then raises common.AccountLimited)."""
+        return self._w.alt_conn is not None
 
     def log(self, msg: str) -> None:
         self._w.sig_log.emit(str(msg))
@@ -69,12 +81,17 @@ class ToolWorker(_AskThread):
     sig_progress = Signal(int, int)         # done, total (0 = unknown)
     sig_done = Signal(bool, str)            # ok, message
 
-    def __init__(self, tool_func, params: dict, conn: dict, parent=None) -> None:
-        """conn: {'api_id','api_hash','phone','session'}"""
+    def __init__(self, tool_func, params: dict, conn: dict, parent=None,
+                 alt_conn: dict | None = None) -> None:
+        """conn: {'api_id','api_hash','phone','session'}. `alt_conn`, same
+        shape (Config.alt_conn): the other account — if the running one hits
+        a long FloodWait, the job carries on there instead of sleeping it out
+        (at most once per job)."""
         super().__init__(parent)
         self.tool_func = tool_func
         self.params = params
         self.conn = conn
+        self.alt_conn = alt_conn
 
     def run(self) -> None:  # QThread entry
         loop = asyncio.new_event_loop()
@@ -92,10 +109,9 @@ class ToolWorker(_AskThread):
                 pass
             loop.close()
 
-    async def _main(self) -> str:
+    async def _connect(self, ctx):
         from telethon import TelegramClient
 
-        ctx = Ctx(self)
         client = TelegramClient(
             self.conn["session"], int(self.conn["api_id"]), self.conn["api_hash"]
         )
@@ -108,8 +124,36 @@ class ToolWorker(_AskThread):
         me = await client.get_me()
         ctx.log(f"Connected as {getattr(me, 'first_name', '')} "
                 f"(+{getattr(me, 'phone', '?')}).")
+        return client
+
+    async def _main(self) -> str:
+        from telethon import errors
+
+        from .tools.common import FLOOD_SWITCH_SECONDS, AccountLimited
+
+        ctx = Ctx(self)
+        client = await self._connect(ctx)
         try:
-            return await self.tool_func(client, self.params, ctx)
+            while True:
+                try:
+                    return await self.tool_func(client, self.params, ctx)
+                except AccountLimited as lim:
+                    seconds = lim.seconds
+                except errors.FloodWaitError as exc:
+                    # Escaped a tool that doesn't catch per item (a single
+                    # channel fetch). Only worth switching for a long wait and
+                    # only if there's somewhere to switch to.
+                    seconds = int(getattr(exc, "seconds", 0) or 0)
+                    if self.alt_conn is None or seconds < FLOOD_SWITCH_SECONDS:
+                        raise
+                # Long FloodWait on this account: hand the rest of the job to
+                # the other one. Once — the other account can be limited too,
+                # and bouncing between two limited accounts helps nobody.
+                ctx.log(f"FloodWait: Telegram asks this account to wait "
+                        f"{seconds}s — switching to the other account.")
+                await client.disconnect()
+                self.conn, self.alt_conn = self.alt_conn, None
+                client = await self._connect(ctx)
         finally:
             await client.disconnect()
 

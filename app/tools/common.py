@@ -28,8 +28,42 @@ def normalize_channel_ref(value: str) -> str:
     return f"@{ident}"
 
 
+# A FloodWait at least this long is not worth sleeping through when the job
+# has another Telegram account to hand over to (see app.worker.ToolWorker).
+FLOOD_SWITCH_SECONDS = 120
+
+
+class AccountLimited(BaseException):
+    """The running account hit a long FloodWait and the job has a second
+    account to continue with. A BaseException on purpose: the tools' per-item
+    `except Exception` handlers ("log it, skip this channel") must not
+    swallow it — only ToolWorker._main catches it, to switch accounts and
+    re-run the tool, which resumes via ctx.done."""
+
+    def __init__(self, seconds: int) -> None:
+        super().__init__(f"FloodWait {seconds}s")
+        self.seconds = seconds
+
+
+def _can_switch(ctx) -> bool:
+    return bool(getattr(ctx, "can_switch", lambda: False)())
+
+
+def check_flood(ctx, exc: BaseException) -> None:
+    """Call first in an `except Exception as exc` handler: turns a long
+    FloodWaitError into AccountLimited when there's another account to
+    switch to; otherwise does nothing and the handler carries on as before."""
+    from telethon import errors
+
+    seconds = int(getattr(exc, "seconds", 0) or 0) if isinstance(exc, errors.FloodWaitError) else 0
+    if seconds >= FLOOD_SWITCH_SECONDS and _can_switch(ctx):
+        raise AccountLimited(seconds) from exc
+
+
 async def retry(ctx, coro, *args, **kwargs):
-    """Call coro(*args, **kwargs) with FloodWait / transient-error retries."""
+    """Call coro(*args, **kwargs) with FloodWait / transient-error retries.
+    A FloodWait of FLOOD_SWITCH_SECONDS or more raises AccountLimited instead
+    of sleeping, when the job can switch to its other account."""
     from telethon import errors
 
     for attempt in range(10):
@@ -38,6 +72,7 @@ async def retry(ctx, coro, *args, **kwargs):
         try:
             return await coro(*args, **kwargs)
         except errors.FloodWaitError as e:
+            check_flood(ctx, e)
             ctx.log(f"  FloodWait: sleeping {e.seconds}s…")
             await _sleep_cancellable(ctx, e.seconds)
         except (ConnectionError, OSError, asyncio.TimeoutError) as e:

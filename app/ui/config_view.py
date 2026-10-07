@@ -98,6 +98,7 @@ class ConfigView(QWidget):
         self.channel_store = channel_store
         self.account_store = account_store
         self.worker: ToolWorker | None = None
+        self.last_fetch_account = FIRST_ACCOUNT
         # Lean-refresh groups still to run after the current one — one per
         # Telegram account with channels assigned to it (see lean_refresh).
         self._lean_queue: list[tuple[int, list[str]]] = []
@@ -371,6 +372,13 @@ class ConfigView(QWidget):
         self.period_combo.addItems([self.tr_(f"period_{k}") for k in PERIOD_KEYS])
         self.period_combo.setCurrentIndex(0)  # 2 years
         self.fetch_form.addRow(self.tr_("fetch_period"), self.period_combo)
+        # Which Telegram account scans the channel — only shown once a second
+        # phone is set (see _sync_account_combo). A private channel only one
+        # of the accounts has joined is "not accessible" from the other.
+        self.account_combo = QComboBox()
+        self.account_combo.addItems(["", ""])
+        self.fetch_form.addRow(self.tr_("fetch_account"), self.account_combo)
+        self._sync_account_combo()
         card.body.addLayout(self.fetch_form)
 
         self.public_check = QCheckBox(self.tr_("fetch_public"))
@@ -1562,6 +1570,10 @@ class ConfigView(QWidget):
             lbl.setText(self.tr_("fetch_period"))
         for i, k in enumerate(PERIOD_KEYS):
             self.period_combo.setItemText(i, self.tr_(f"period_{k}"))
+        self._sync_account_combo()
+        lbl = self.fetch_form.labelForField(self.account_combo)
+        if lbl:
+            lbl.setText(self.tr_("fetch_account"))
         self.public_check.setText(self.tr_("fetch_public"))
         self.fetch_btn.setText(self.tr_("fetch_button"))
         self.stop_btn.setText(self.tr_("stop"))
@@ -1634,6 +1646,8 @@ class ConfigView(QWidget):
     def _load_fields(self) -> None:
         for key, edit in self.edits.items():
             edit.setText(self.cfg.get(key))
+        if hasattr(self, "account_combo"):
+            self._sync_account_combo()
 
     def _store_fields(self) -> None:
         for key, edit in self.edits.items():
@@ -1642,6 +1656,7 @@ class ConfigView(QWidget):
     def _autosave_fields(self) -> None:
         self._store_fields()
         self.cfg.save()
+        self._sync_account_combo()
 
     def _save(self) -> None:
         self._store_fields()
@@ -1772,14 +1787,49 @@ class ConfigView(QWidget):
             "channel": channel,
             "period": PERIOD_KEYS[self.period_combo.currentIndex()],
             "fetch_public": self.public_check.isChecked(),
+            "account": self._fetch_account_choice(),
         }
         self.fetch(params)
 
+    def _fetch_account_choice(self) -> int:
+        """1 or 2 — what the Account combo says (always 1 while it's hidden
+        because there is no second phone)."""
+        return int(self.account_combo.currentData() or FIRST_ACCOUNT) \
+            if self.cfg.has_second_account() else FIRST_ACCOUNT
+
+    def _sync_account_combo(self) -> None:
+        """Label the two accounts with their phones and show the row only
+        when a second phone is set."""
+        have_two = self.cfg.has_second_account()
+        phones = (self.edits["PHONE_NUMBER"].text().strip() if hasattr(self, "edits")
+                  and "PHONE_NUMBER" in self.edits else self.cfg.get("PHONE_NUMBER"),
+                  self.edits["PHONE_NUMBER_2"].text().strip() if hasattr(self, "edits")
+                  and "PHONE_NUMBER_2" in self.edits else self.cfg.get("PHONE_NUMBER_2"))
+        current = self.account_combo.currentData()
+        self.account_combo.blockSignals(True)
+        for i, (acc, phone) in enumerate(((FIRST_ACCOUNT, phones[0]), (SECOND_ACCOUNT, phones[1]))):
+            text = self.tr_("fetch_account_n", n=acc) + (f" · {phone}" if phone else "")
+            if self.account_combo.itemData(i) is None:
+                self.account_combo.setItemData(i, acc)
+            self.account_combo.setItemText(i, text)
+        idx = self.account_combo.findData(current) if current else 0
+        self.account_combo.setCurrentIndex(max(0, idx))
+        self.account_combo.blockSignals(False)
+        label = self.fetch_form.labelForField(self.account_combo)
+        for w in (label, self.account_combo):
+            if w is not None:
+                w.setVisible(have_two)
+
     def fetch(self, params: dict) -> None:
         """Start a channel scan. Reused by the dashboard's Re-fetch button."""
+        params = dict(params)
+        account = int(params.pop("account", 0) or self._fetch_account_choice())
         self._store_fields()
         if not self._has_conn():
             QMessageBox.warning(self, self.tr_("app_title"), self.tr_("missing_conn"))
+            return
+        if account == SECOND_ACCOUNT and not self.cfg.has_second_account():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("missing_conn_2"))
             return
         if self.is_running():
             QMessageBox.warning(self, self.tr_("app_title"), self.tr_("worker_running"))
@@ -1794,14 +1844,9 @@ class ConfigView(QWidget):
         self.cfg.save()
 
         self.log_view.clear()
-        conn = {
-            "api_id": self.cfg.get("API_ID").strip(),
-            "api_hash": self.cfg.get("API_HASH").strip(),
-            "phone": self.cfg.get("PHONE_NUMBER").strip(),
-            "session": self.cfg.session_path(),
-        }
-        self.worker = ToolWorker(run_channel_stat, params, conn, parent=self,
-                                 alt_conn=self.cfg.alt_conn(1))
+        self.last_fetch_account = account   # read by MainWindow._on_channel_fetched
+        self.worker = ToolWorker(run_channel_stat, params, self.cfg.conn(account), parent=self,
+                                 alt_conn=self.cfg.alt_conn(account))
         self.worker.sig_log.connect(self._append_log)
         self.worker.sig_progress.connect(self._on_progress)
         self.worker.sig_ask.connect(self._on_ask)
@@ -1868,6 +1913,8 @@ class ConfigView(QWidget):
             self.channel_fetched.emit(payload)
         else:
             self._append_log(self.tr_("done_fail", msg=msg))
+            if self.cfg.has_second_account() and "not accessible" in (msg or ""):
+                self._append_log(self.tr_("fetch_try_other_account"))
 
     # --------------------------------------------------- refresh comments
     def _on_assign_all_clicked(self) -> None:

@@ -31,6 +31,7 @@ _TAG_BADGE_LEN = 3
 class SidePanel(QFrame):
     config_selected = Signal()
     folder_stat_selected = Signal()
+    folder_search_selected = Signal()
     content_quality_selected = Signal()
     mutual_pr_selected = Signal()
     ad_campaign_selected = Signal()
@@ -133,7 +134,18 @@ class SidePanel(QFrame):
         self.folder_stat_btn.setStyleSheet(f"padding: {sp(4)}px 0px; border: none;")
         self.folder_stat_btn.clicked.connect(lambda: self.folder_stat_selected.emit())
         self.group.addButton(self.folder_stat_btn)
-        root.addWidget(_bordered(self.folder_stat_btn))
+        # Like the language button beside Config: a small ghost button in
+        # the same pill — but this one is a page, so it joins the exclusive
+        # group and shows as checked while Folder Search is open.
+        self.search_btn = QPushButton("🔍")
+        self.search_btn.setObjectName("ghost")
+        self.search_btn.setCheckable(True)
+        self.search_btn.setMinimumWidth(36)
+        self.search_btn.setStyleSheet(f"padding: {sp(4)}px 12px; border: none;")
+        self.search_btn.setToolTip(i18n.tr("nav_folder_search_hint"))
+        self.search_btn.clicked.connect(lambda: self.folder_search_selected.emit())
+        self.group.addButton(self.search_btn)
+        root.addWidget(_bordered(self.folder_stat_btn, self.search_btn))
         root.addSpacing(4)
 
         self.content_quality_btn = NavButton(None, i18n.tr("nav_content_quality"))
@@ -436,6 +448,7 @@ class SidePanel(QFrame):
         if on:
             self.config_btn.setChecked(False)
             self.folder_stat_btn.setChecked(False)
+            self.search_btn.setChecked(False)
             self.content_quality_btn.setChecked(False)
             self._sync_checked_buttons(self._selected_keys)
             self.compare_charts_selected.emit(list(self._selected_keys))
@@ -452,6 +465,7 @@ class SidePanel(QFrame):
         if on:
             self.config_btn.setChecked(False)
             self.folder_stat_btn.setChecked(False)
+            self.search_btn.setChecked(False)
             self.content_quality_btn.setChecked(False)
             # Lower cap than Compare/Compare Charts — trim to the
             # most-recently-selected on the way in rather than silently
@@ -512,6 +526,9 @@ class SidePanel(QFrame):
     def select_folder_stat(self) -> None:
         self.folder_stat_btn.setChecked(True)
 
+    def select_folder_search(self) -> None:
+        self.search_btn.setChecked(True)
+
     def select_content_quality(self) -> None:
         self.content_quality_btn.setChecked(True)
 
@@ -536,6 +553,7 @@ class SidePanel(QFrame):
         self.config_btn.set_text(self.i18n.tr("nav_config"))
         self.folder_stat_btn.set_text(self.i18n.tr("nav_folder_stat"))
         self.content_quality_btn.set_text(self.i18n.tr("nav_content_quality"))
+        self.search_btn.setToolTip(self.i18n.tr("nav_folder_search_hint"))
         self.mutual_pr_btn.set_text(self.i18n.tr("nav_mutual_pr_short"))
         self.mutual_pr_btn.setToolTip(self.i18n.tr("nav_mutual_pr"))
         self.ad_campaign_btn.set_text(self.i18n.tr("nav_ad_campaign"))

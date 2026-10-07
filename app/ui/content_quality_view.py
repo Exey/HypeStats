@@ -143,8 +143,8 @@ def _followers_cap(members: int) -> int | None:
 # fluke, so a view count alone no longer excuses a weak share count there.
 _TOP50_MIN_VIEWS = 4000
 _TOP50_MIN_SHARES = 11
-_TOP250_MIN_VIEWS = 3000
-_TOP250_MIN_SHARES = 30
+_TOP250_MIN_VIEWS = 4000
+_TOP250_MIN_SHARES = 35
 
 
 def _quality_floor(max_posts: int) -> tuple[int, int, bool] | None:

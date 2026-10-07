@@ -22,6 +22,7 @@ from .compare.mentions_view import MentionsView
 from .config_view import ConfigView
 from .content_quality_view import ContentQualityView
 from .dashboard_view import DashboardView
+from .folder_search_view import FolderSearchView
 from .folder_stat_view import FolderStatView
 from .mutual_pr_view import MutualPrView
 from .side_panel import SidePanel
@@ -64,6 +65,7 @@ class MainWindow(QMainWindow):
         self.side = SidePanel(self.i18n, self.folder_store, self.tag_store)
         self.side.config_selected.connect(self._show_config)
         self.side.folder_stat_selected.connect(self._show_folder_stat)
+        self.side.folder_search_selected.connect(self._show_folder_search)
         self.side.content_quality_selected.connect(self._show_content_quality)
         self.side.mutual_pr_selected.connect(self._show_mutual_pr)
         self.side.ad_campaign_selected.connect(self._show_ad_campaign)
@@ -130,6 +132,7 @@ class MainWindow(QMainWindow):
         self.mentions_view = MentionsView(self.i18n)
         self.ad_campaign = AdCampaignView(self.i18n, self.folder_store, self.store,
                                           self.tag_store, self.cfg)
+        self.folder_search = FolderSearchView(self.i18n, self.folder_store, self.store, self.cfg)
         self.stack.addWidget(self.config_view)       # index 0
         self.stack.addWidget(self.dashboard)         # index 1
         self.stack.addWidget(self.compare)           # index 2
@@ -139,6 +142,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.mutual_pr)         # index 6
         self.stack.addWidget(self.mentions_view)     # index 7
         self.stack.addWidget(self.ad_campaign)       # index 8
+        self.stack.addWidget(self.folder_search)     # index 9
         content_col.addWidget(self.stack, 1)
 
         content_wrap = QWidget()
@@ -208,6 +212,7 @@ class MainWindow(QMainWindow):
         self.content_quality.refresh()
         self.mutual_pr.refresh()
         self.ad_campaign.refresh()
+        self.folder_search.refresh()
 
     def _on_folders_changed(self) -> None:
         # Folder OR tag list/assignments changed, from the Config screen,
@@ -223,6 +228,7 @@ class MainWindow(QMainWindow):
         self.content_quality.refresh()
         self.mutual_pr.refresh()
         self.ad_campaign.refresh()
+        self.folder_search.refresh()
         if self._current_key:
             self.dashboard.refresh_folder_button()
             self.dashboard.refresh_tag_button()
@@ -248,6 +254,12 @@ class MainWindow(QMainWindow):
         self.side.select_folder_stat()
         self.folder_stat.refresh()
         self.stack.setCurrentWidget(self.folder_stat)
+
+    def _show_folder_search(self) -> None:
+        self._current_key = None
+        self.side.select_folder_search()
+        self.folder_search.refresh()
+        self.stack.setCurrentWidget(self.folder_search)
 
     def _show_content_quality(self) -> None:
         self._current_key = None
@@ -340,6 +352,9 @@ class MainWindow(QMainWindow):
         if existing_key:
             payload["key"] = existing_key
         key = self.store.save(payload)
+        # Whichever account just read this channel is the one that can: route
+        # its later Lean refreshes / refetches there too (see app.accounts).
+        self.account_store.set_channel_account(key, self.config_view.last_fetch_account)
         self._refresh_sidebar()
         self._show_channel(key)
 
@@ -400,6 +415,7 @@ class MainWindow(QMainWindow):
         self.mutual_pr.retranslate()
         self.mentions_view.retranslate()
         self.ad_campaign.retranslate()
+        self.folder_search.retranslate()
         self.unfold_btn.setToolTip(self.i18n.tr("nav_unfold_hint"))
 
     # --------------------------------------------------------------- theme

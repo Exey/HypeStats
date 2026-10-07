@@ -266,6 +266,20 @@ on screen into a local cache — nothing else in the app downloads media).
 Export as a Markdown table or a copyable Tg-links list with a "top authors"
 summary.
 
+### Folder Search view (`🔍`)
+
+The 🔍 button beside **Folders & Tags** in the sidebar. Pick a folder (or all),
+type words, and every stored post containing **all** of them (case-insensitive,
+substring — "фото" also finds "фотограф") appears as a wide card: the post's
+**full, untrimmed text** with each match highlighted on the left, its
+thumbnail, Quality gauge and counts on the right, in 2–3 columns depending on
+the window width — or pick 1–4 columns by hand (4 switches to a compact card
+and needs a wide window; a narrower one gets as many as fit). Sort by Newest (default) / Quality / Most views / Most reposts and show
+25–500 results (default 25); **Fetch media** downloads the thumbnails of the cards shown.
+The header stays put while the results scroll. Search runs over the posts
+stored in each checkpoint (top posts, the newest ~50, the best of each month) —
+not a channel's full history; see [post_search.py](app/post_search.py).
+
 ### Mutual PR (ad-swap) view (`🤝`)
 
 Above the main table sits a **Channel links** card: which tracked channels
@@ -544,6 +558,7 @@ app/
 ├── scoring.py              # per-post content-quality formula (shared)
 ├── rating.py               # composite per-channel-per-period Rating (shared)
 ├── scoring_pr.py           # Mutual PR ad-swap forecast heuristics
+├── post_search.py          # Folder Search: word matching, highlighting, sorting (Qt-free)
 ├── ad_campaign.py          # Ad Campaign planner: ad-list price, prime-era detection, slot planning
 ├── worker.py               # QThread workers: login flows + tool runs
 ├── i18n.py                 # English / Russian strings
@@ -568,6 +583,7 @@ app/
     ├── content_quality_view.py # High-Quality Posts grid
     ├── mutual_pr_view.py      # ad-swap follower-gain forecast table
     ├── ad_campaign_view.py    # Ad Campaign: inputs row, plan tiles, best posts, recommendations, timeline
+    ├── folder_search_view.py  # Folder Search: header + 2-3 column result cards with highlighted full text
     ├── ad_gantt.py            # native QPainter Gantt used by the Ad Campaign view
     ├── folder_dialog.py       # folder manager dialog
     ├── side_panel.py          # Config + fetched-channels list, compare modes

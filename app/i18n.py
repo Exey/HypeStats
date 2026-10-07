@@ -583,6 +583,12 @@ EN = {
     "fetch_channel": "Channel ID or @username",
     "fetch_channel_placeholder": "@durov or -1001234567890",
     "fetch_period": "Period of analysis",
+    "fetch_account": "Telegram account",
+    "fetch_account_n": "Account {n}",
+    "fetch_try_other_account": "💡 A channel only one of your accounts has "
+                               "joined is \"not accessible\" from the other "
+                               "— pick that account in \"Telegram account\" "
+                               "and fetch again.",
     "period_3m": "3 months",
     "period_6m": "6 months",
     "period_1y": "1 year",
@@ -700,6 +706,34 @@ EN = {
     # ad campaign view
     "nav_mutual_pr_short": "Mutual PR",
     "nav_ad_campaign": "Ad Campaign",
+    "nav_folder_search_hint": "Search posts in folders",
+    "fsearch_title": "🔍 Folder Search",
+    "fsearch_all_folders": "All folders",
+    "fsearch_placeholder": "Words to find in post text…",
+    "fsearch_sort_quality": "Quality",
+    "fsearch_sort_newest": "Newest",
+    "fsearch_sort_views": "Most views",
+    "fsearch_sort_reposts": "Most reposts",
+    "fsearch_sort_hint": "Order of the results",
+    "fsearch_limit_n": "Show {n}",
+    "fsearch_limit_hint": "How many results to show",
+    "fsearch_cols_auto": "Columns: auto",
+    "fsearch_cols_n": "{n} col.",
+    "fsearch_cols_hint": "Number of card columns. Auto picks 2-3 by window width; "
+                         "4 uses a compact card and needs a wide window — a "
+                         "narrower one gets as many as fit.",
+    "fsearch_prompt": "Type at least 2 characters (one or more words) — posts "
+                      "containing all of them are shown, matches highlighted. Searches the posts stored in "
+                      "each channel's checkpoint (its top posts, newest ~50 and "
+                      "the best of each month), not the full history.",
+    "fsearch_too_short": "Type at least {n} characters to search.",
+    "fsearch_no_channels": "No channels tracked yet — fetch one from the Config "
+                           "screen.",
+    "fsearch_no_results": "No stored post contains all of: {query}",
+    "fsearch_status": "{found} found, showing {shown} · searched {posts} stored "
+                      "posts in {channels} channels",
+    "fsearch_open": "↗ Open post",
+    "fsearch_repost": "↪ repost",
     "nav_ad_campaign_hint": "Plan paid ad placements across your tracked "
                             "channels to hit a follower target.",
     "ad_title": "Ad Campaign",
@@ -1399,6 +1433,12 @@ RU = {
     "fetch_channel": "ID канала или @username",
     "fetch_channel_placeholder": "@durov или -1001234567890",
     "fetch_period": "Период анализа",
+    "fetch_account": "Аккаунт Telegram",
+    "fetch_account_n": "Аккаунт {n}",
+    "fetch_try_other_account": "💡 Канал, в котором состоит только один из "
+                               "ваших аккаунтов, «недоступен» для другого — "
+                               "выберите нужный в «Аккаунт Telegram» и "
+                               "загрузите снова.",
     "period_3m": "3 месяца",
     "period_6m": "6 месяцев",
     "period_1y": "1 год",
@@ -1511,6 +1551,36 @@ RU = {
     # ad campaign view
     "nav_mutual_pr_short": "Взаимопиар",
     "nav_ad_campaign": "Реклама",
+    "nav_folder_search_hint": "Поиск по постам в папках",
+    "fsearch_title": "🔍 Поиск по папкам",
+    "fsearch_all_folders": "Все папки",
+    "fsearch_placeholder": "Слова для поиска в тексте постов…",
+    "fsearch_sort_quality": "Качество",
+    "fsearch_sort_newest": "Новые",
+    "fsearch_sort_views": "Больше просмотров",
+    "fsearch_sort_reposts": "Больше репостов",
+    "fsearch_sort_hint": "Порядок результатов",
+    "fsearch_limit_n": "Показать {n}",
+    "fsearch_limit_hint": "Сколько результатов показывать",
+    "fsearch_cols_auto": "Колонки: авто",
+    "fsearch_cols_n": "{n} кол.",
+    "fsearch_cols_hint": "Число колонок с карточками. «Авто» — 2-3 по ширине "
+                         "окна; 4 колонки используют компактную карточку и "
+                         "требуют широкого окна — в узком будет столько, "
+                         "сколько помещается.",
+    "fsearch_prompt": "Введите минимум 2 символа (одно или несколько слов) — "
+                      "покажутся посты, где есть все они, совпадения подсвечены. Поиск идёт по "
+                      "постам, сохранённым в чекпоинте каждого канала (лучшие, "
+                      "последние ~50 и лучший за каждый месяц), а не по всей "
+                      "истории.",
+    "fsearch_too_short": "Введите минимум {n} символа для поиска.",
+    "fsearch_no_channels": "Пока нет отслеживаемых каналов — соберите канал на "
+                           "экране Config.",
+    "fsearch_no_results": "Ни в одном сохранённом посте нет всех слов: {query}",
+    "fsearch_status": "Найдено {found}, показано {shown} · просмотрено "
+                      "сохранённых постов: {posts} в {channels} каналах",
+    "fsearch_open": "↗ Открыть пост",
+    "fsearch_repost": "↪ репост",
     "nav_ad_campaign_hint": "Рекламная кампания: спланировать платные "
                             "размещения в отслеживаемых каналах под цель по "
                             "подписчикам.",

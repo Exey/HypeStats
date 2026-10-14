@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import median
 
-from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtCore import QLocale, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QFileDialog, QFormLayout, QGroupBox,
@@ -26,7 +26,7 @@ from ..activity import channel_activity_trend
 from ..config import CONN_FIELDS, config_dir
 from ..errors import friendly_os_error
 from ..folders import FolderStore
-from ..periods import period_key_label
+from ..periods import period_key_label, year_lag_last_month
 from ..rating import VIRAL_SHARE_DISPLAY_CAP, score_entries
 from ..scoring import post_gauge_value, post_score_raw
 from ..store import ChannelStore
@@ -1163,9 +1163,9 @@ class ConfigView(QWidget):
         self.folders_list_lbl.setText("&nbsp;&nbsp;&nbsp;".join(chips))
 
     def _collect_export_periods(self) -> list[tuple[str, str, tuple]]:
-        """(label, mode, period_key) for every Half-Year bucket across all
-        tracked channels regardless of folder (newest first), then every
-        Season bucket the same way — matches FolderStatView's own period
+        """(label, mode, period_key) for every calendar-Year bucket across
+        all tracked channels regardless of folder (newest first), then every
+        Half-Year bucket, then every Season bucket the same way — matches FolderStatView's own period
         picker (see its _collect_all_period_keys), just flattened into one
         combo here instead of mode buttons on their own page."""
         def keys_for(mode: str) -> list[tuple[str, str, tuple]]:
@@ -1183,10 +1183,28 @@ class ConfigView(QWidget):
                         continue
                     key, label = period_key_label(year, month, mode)
                     keys[key] = label
+            if mode == "year":
+                keys = {k: self._year_label(k[0], label) for k, label in keys.items()}
             return [(label, mode, key) for key, label in
                     sorted(keys.items(), key=lambda kv: kv[0], reverse=True)]
 
-        return keys_for("halfyear") + keys_for("season")
+        # Whole calendar years first (the new option), then the half-years
+        # and seasons that were already here.
+        return keys_for("year") + keys_for("halfyear") + keys_for("season")
+
+    def _year_label(self, year: int, label: str) -> str:
+        """"2026" — or "2026 (Jan–Jul)" when the export's 2-month lag (see
+        periods.YEAR_LAG_MONTHS) cuts the year short, so the combo says what
+        it will actually analyze."""
+        last_y, last_m = year_lag_last_month()
+        if year < last_y or (year == last_y and last_m == 12):
+            return label
+        if year > last_y:
+            return f"{label} (—)"   # nothing old enough yet
+        names = QLocale(self.i18n.lang)
+        first = names.monthName(1, QLocale.FormatType.ShortFormat).rstrip(".")
+        last = names.monthName(last_m, QLocale.FormatType.ShortFormat).rstrip(".")
+        return f"{label} ({first}–{last})" if last_m > 1 else f"{label} ({first})"
 
     def refresh_export_periods(self) -> None:
         current = self.folders_export_period_combo.currentData()
@@ -1413,6 +1431,8 @@ class ConfigView(QWidget):
                 year, month = (int(x) for x in m.get("label", "").split("-"))
             except ValueError:
                 continue
+            if mode == "year" and (year, month) > year_lag_last_month():
+                continue   # too recent to have gathered its views — see periods.YEAR_LAG_MONTHS
             key, _label = period_key_label(year, month, mode)
             b = buckets.setdefault(key, {"count": 0, "count_total": 0, "views": 0,
                                          "shares": 0, "reactions": 0, "viral_count": 0})
@@ -1432,6 +1452,8 @@ class ConfigView(QWidget):
                 dt = datetime.fromisoformat((r.get("date") or "").replace("Z", "+00:00"))
             except ValueError:
                 continue
+            if mode == "year" and (dt.year, dt.month) > year_lag_last_month():
+                continue   # same lag as the monthly totals above
             if period_key_label(dt.year, dt.month, mode)[0] == target_key:
                 period_rows.append(r)
         quality, quality_display = _quality(period_rows)

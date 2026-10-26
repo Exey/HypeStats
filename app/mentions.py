@@ -1147,7 +1147,7 @@ def compute_channel_mentions_cache(data: dict, store: MentionsStore,
 
         {"fairness_pct": int | None, "fair": int, "fake": int,
          "no_link": int, "unique": int, "tg_pct": int | None,
-         "web_pct": int | None}
+         "web_pct": int | None, "names": int, "linked": int}
 
     fairness_pct is None (rather than the dict itself) exactly when there's
     no fair-or-fake data to divide — the same "—" case the interactive
@@ -1167,6 +1167,7 @@ def compute_channel_mentions_cache(data: dict, store: MentionsStore,
 
     posts = data.get("rows") or []
     no_link_count = 0
+    names_total = linked_total = 0
     if posts:
         all_names = extract_all_names_per_post(posts, store, name_exceptions)
         name_hits: set[str] = set()
@@ -1177,6 +1178,7 @@ def compute_channel_mentions_cache(data: dict, store: MentionsStore,
             for name, _link in name_link_matches(names, links):
                 linked_names.add(name)
         no_link_count = len(name_hits - linked_names)
+        names_total, linked_total = len(name_hits), len(linked_names)
     fairness_pct = apply_no_link_penalty(fairness_pct, no_link_count, fair)
 
     seen: dict[str, bool] = {}
@@ -1197,6 +1199,9 @@ def compute_channel_mentions_cache(data: dict, store: MentionsStore,
         "fairness_pct": fairness_pct, "fair": fair, "fake": fake,
         "no_link": no_link_count, "unique": unique,
         "tg_pct": tg_pct, "web_pct": web_pct,
+        # Distinct names found in the stored posts' text, and how many of
+        # them sit next to a link — the Config Lean-refresh "Mentions" column.
+        "names": names_total, "linked": linked_total,
     }
 
 

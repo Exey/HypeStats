@@ -121,6 +121,12 @@ class ChannelStore:
                 # calculated but has no fair/fake links. Lets the Folders
                 # MD export show "calculated, no score" as "—" and "never
                 # calculated" as blank.
+                # When the Config "Refresh mentions" job last re-read this
+                # channel's post links, and what that left in the cache
+                # (distinct names found / how many of them are linked).
+                "mentions_refreshed_at": data.get("mentions_refreshed_at", ""),
+                "mentions_names": (data.get("mentions_cache") or {}).get("names"),
+                "mentions_linked": (data.get("mentions_cache") or {}).get("linked"),
                 "mentions_calculated": bool(
                     (data.get("mentions_cache") or {}).get("calculated_at")),
             })

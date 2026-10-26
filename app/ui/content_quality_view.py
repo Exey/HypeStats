@@ -70,6 +70,7 @@ from .widgets import (
 _GRID_SPACING = 14
 _PAGE_MARGIN_LEFT = 34
 _PAGE_MARGIN_RIGHT = 40
+POTENTIAL_SCORE = 600   # the "600+" in the Potential table: a post at/above this CQI
 MAX_POSTS_SHOWN = 80   # keeps a big folder/period from being an unbounded grid
 TOP_AUTHORS_SHOWN = 5   # "Best N authors" summary at the top of the Tg Links export
 FOLDER_HITMAKERS_SHOWN = 10   # "Top 10 {folder} hitmakers" per folder in the MD export
@@ -1222,7 +1223,89 @@ class ContentQualityView(QWidget):
             shares = fmt_int(int(row.get("forwards", 0) or 0))
             lines.append(f"| {label} | {score} | {thumb_md} | {media} | {text} | "
                         f"{views} | {shares} | {link} |")
+        potential = self._build_potential_table()
+        if potential:
+            lines.append("")
+            lines += potential
         return "\n".join(lines) + "\n"
+
+    def _period_month_filter(self):
+        """(year, month) -> bool: does that calendar month belong to the
+        selected period? Month granularity on purpose — the per-month post
+        counts (`distributions.monthly`) that the Potential table's
+        denominator comes from can't be cut mid-month, so a rolling "Year"
+        window includes the months it touches."""
+        mode = self._period_mode
+        if mode == "year":
+            cutoff = None
+            upper_year = None
+            if isinstance(self._year_window_key, int):
+                upper_year = self._year_window_key
+            else:
+                cutoff = year_window_cutoff(self._year_window_days())
+            first = (cutoff.year, cutoff.month) if cutoff is not None else None
+
+            def _in_year(y: int, m: int) -> bool:
+                if upper_year is not None:
+                    return y == upper_year
+                return first is None or (y, m) >= first
+            return _in_year
+        target = self._selected_period_key
+        return lambda y, m: period_key_label(y, m, mode)[0] == target
+
+    def _build_potential_table(self) -> list[str]:
+        """"Potential": per channel in scope, how many of its posts in the
+        selected period reached CQI 600+ and what share of all its posts that
+        is. Count is the channel's own posts in the period from the monthly
+        series (every scanned post, albums already merged into one, reposts
+        forwarded in from other channels left out); the 600+ figure is
+        counted over the stored `rows` pool — top posts, newest ~50, best of
+        each month — so a high scorer outside that pool is missed and the
+        rate is a floor, not exact. Same minimum-followers filter as the
+        grid; channels with no posts in the period are omitted; best first."""
+        if not self._channels:
+            return []
+        in_period = self._period_month_filter()
+        min_followers = int(self.min_followers_combo.currentData() or 0)
+        rows_out = []
+        for ch in self._channels:
+            if min_followers and _channel_members(ch) < min_followers:
+                continue
+            monthly = (ch.get("distributions") or {}).get("monthly") or []
+            count = 0
+            for m in monthly:
+                try:
+                    y, mo = (int(x) for x in m.get("label", "").split("-"))
+                except ValueError:
+                    continue
+                if in_period(y, mo):
+                    count += int(m.get("count_own", m.get("count", 0)) or 0)
+            if not count:
+                continue
+            avg_views = _channel_avg_views(ch)
+            high = 0
+            for row in ch.get("rows") or []:
+                if row.get("repost"):
+                    continue
+                dt = _parse_date(row.get("date", ""))
+                if dt is None or not in_period(dt.year, dt.month):
+                    continue
+                if round(post_gauge_value(post_score_raw(row, avg_views))) >= POTENTIAL_SCORE:
+                    high += 1
+            rows_out.append((high, high / count, count, ch))
+        if not rows_out:
+            return []
+        rows_out.sort(key=lambda r: (r[0], r[1], r[2]), reverse=True)
+        headers = [self.tr_("cqi_md_col_channel"), self.tr_("cqi_md_col_count"),
+                   self.tr_("cqi_md_col_potential_count", n=POTENTIAL_SCORE),
+                   self.tr_("cqi_md_col_rate")]
+        lines = [f"## {self.tr_('cqi_md_potential_title')}", "",
+                 "| " + " | ".join(headers) + " |",
+                 "| " + " | ".join(["---"] * len(headers)) + " |"]
+        for high, rate, count, ch in rows_out:
+            label = _channel_label(ch).replace("|", "")
+            lines.append(f"| {label} | {fmt_int(count)} | {fmt_int(high)} | {rate * 100:.1f}% |")
+        return lines
 
     def _on_export_md_clicked(self) -> None:
         if not self._post_entries:

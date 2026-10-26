@@ -131,6 +131,17 @@ EN = {
                                       "a 2-year re-fetch on a long-running "
                                       "channel.",
     "lean_refetch_mentions_btn": "🔗 Refetch mentions",
+    "lean_mentions_oldest_btn": "🔗 Oldest {n} mentions",
+    "lean_mentions_oldest_hint": "Refetch mentions for the {n} channels whose "
+                                 "mentions were refreshed longest ago — never-"
+                                 "refreshed ones first, biggest channel first.",
+    "lean_refresh_col_mentions": "Mentions",
+    "lean_refresh_col_mentions_hint": "linked / names (days since refresh): "
+                                      "names found in the channel's stored "
+                                      "posts and how many of them have a link, "
+                                      "then days since \"Refetch mentions\" "
+                                      "last re-read its links. — = not known "
+                                      "yet; refetching fills it in.",
     "lean_refetch_mentions_hint": "Re-fetch just the links (see "
                                   "tools.mentions_refresh) for the ticked "
                                   "channels' already-textual stored posts — "
@@ -354,6 +365,10 @@ EN = {
     "cqi_md_col_text": "Text",
     "cqi_md_col_link": "Link",
     "cqi_md_hitmakers_title": "Top {n} {folder} hitmakers",
+    "cqi_md_potential_title": "Potential",
+    "cqi_md_col_count": "Count",
+    "cqi_md_col_potential_count": "{n}+ Score Count",
+    "cqi_md_col_rate": "Rate",
     "cqi_all_folders": "All folders",
     "cqi_max_posts_n": "Top {n}",
     "cqi_max_posts_hint": "How many top posts to show overall — in the grid, "
@@ -978,6 +993,16 @@ RU = {
                                       "Гораздо медленнее пересканирования за "
                                       "2 года для канала с долгой историей.",
     "lean_refetch_mentions_btn": "🔗 Обновить упоминания",
+    "lean_mentions_oldest_btn": "🔗 {n} старых упоминаний",
+    "lean_mentions_oldest_hint": "Обновить упоминания у {n} каналов, где они "
+                                 "обновлялись давнее всего — сначала ещё ни "
+                                 "разу не обновлявшиеся, самые крупные первыми.",
+    "lean_refresh_col_mentions": "Упоминания",
+    "lean_refresh_col_mentions_hint": "со ссылкой / имён (дней с обновления): "
+                                      "имена в сохранённых постах канала и "
+                                      "сколько из них со ссылкой, затем дни с "
+                                      "последнего «Обновить упоминания». — = "
+                                      "пока неизвестно; обновление заполнит.",
     "lean_refetch_mentions_hint": "Заново получить только ссылки для уже "
                                   "текстовых сохранённых постов отмеченных "
                                   "каналов — та же задача, что и строка "
@@ -1209,6 +1234,10 @@ RU = {
     "cqi_md_col_text": "Текст",
     "cqi_md_col_link": "Ссылка",
     "cqi_md_hitmakers_title": "Топ {n} лучших авторов папки «{folder}»",
+    "cqi_md_potential_title": "Потенциал",
+    "cqi_md_col_count": "Постов",
+    "cqi_md_col_potential_count": "Постов с баллом {n}+",
+    "cqi_md_col_rate": "Доля",
     "cqi_all_folders": "Все папки",
     "cqi_max_posts_n": "Топ {n}",
     "cqi_max_posts_hint": "Сколько постов показывать всего — в сетке, "

@@ -15,9 +15,14 @@ if cancelled or interrupted partway through.
 """
 from __future__ import annotations
 
+import time
+
+from ..mentions import (
+    MentionsStore, NameExceptions, cache_channel_mentions, compute_channel_mentions_cache,
+)
+from ..store import ChannelStore
 from .channel_stat import _extract_links
 from .common import check_flood, resolve_entity, retry
-from ..store import ChannelStore
 
 _BATCH = 100  # client.get_messages(ids=...) batch limit
 
@@ -29,6 +34,8 @@ async def run_mentions_refresh(client, p: dict, ctx) -> str:
     total = len(keys)
     ctx.log(f"Refreshing mentions for {total} channel(s)…")
 
+    mentions_store = MentionsStore()
+    name_exceptions = NameExceptions()
     updated_channels = 0
     for done, key in enumerate(keys, 1):
         if ctx.cancelled():
@@ -78,6 +85,17 @@ async def run_mentions_refresh(client, p: dict, ctx) -> str:
                 row["links"] = new_links
                 changed = True
 
+        # Telegram answered for at least one post: the links are as fresh as
+        # they get, so stamp it (even if nothing changed — the stamp is what
+        # the "oldest refreshed" pick and the Mentions column read) and bring
+        # the Ethics / names cache in line with them. Nothing came back
+        # (flood, deleted posts): leave the stamp so it stays first in line.
+        if by_id:
+            data["mentions_refreshed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            cache = compute_channel_mentions_cache(data, mentions_store, name_exceptions)
+            if cache is not None:
+                cache_channel_mentions(data, cache)
+            changed = True
         if changed:
             store.save(data)
             updated_channels += 1

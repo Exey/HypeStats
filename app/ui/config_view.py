@@ -46,6 +46,7 @@ from .theme import ACCENT_PRESETS, COLORS, ZOOM_LEVELS, default_accent, fs
 from .widgets import Card, SectionCard
 
 PERIOD_KEYS = ["2y", "3y", "all"]
+_MENTIONS_OLDEST_N = 10   # channels the "oldest mentions" button refreshes
 _THEME_PREFS = ["system", "light", "dark", "black"]
 
 
@@ -164,6 +165,7 @@ class ConfigView(QWidget):
                            self.lean_1mo_btn, self.lean_3mo_btn,
                            self.lean_selected_btn, self.lean_selected_2y_btn,
                            self.lean_selected_all_btn, self.refetch_mentions_btn,
+                           self.mentions_oldest_btn,
                            self.export_link_report_btn, self.export_mentions_report_btn,
                            self.folders_export_md_btn]
 
@@ -651,6 +653,13 @@ class ConfigView(QWidget):
         card.body.addLayout(comments_row)
 
         btn_row = QHBoxLayout()
+        # "Refresh selected" leads — it's the one used most; the batch
+        # (by age) buttons, the heavier re-fetches and the mentions jobs
+        # follow in their old order.
+        self.lean_selected_btn = QPushButton(self.tr_("lean_refresh_selected_btn"))
+        self.lean_selected_btn.setToolTip(self.tr_("lean_refresh_selected_hint"))
+        self.lean_selected_btn.clicked.connect(self._on_lean_refresh_selected)
+        btn_row.addWidget(self.lean_selected_btn)
         self.lean_1mo_btn = QPushButton(self.tr_("lean_refresh_1mo_btn"))
         self.lean_1mo_btn.setToolTip(self.tr_("lean_refresh_1mo_hint"))
         self.lean_1mo_btn.clicked.connect(lambda: self._on_lean_refresh_clicked("1mo"))
@@ -659,10 +668,6 @@ class ConfigView(QWidget):
         self.lean_3mo_btn.setToolTip(self.tr_("lean_refresh_3mo_hint"))
         self.lean_3mo_btn.clicked.connect(lambda: self._on_lean_refresh_clicked("3mo"))
         btn_row.addWidget(self.lean_3mo_btn)
-        self.lean_selected_btn = QPushButton(self.tr_("lean_refresh_selected_btn"))
-        self.lean_selected_btn.setToolTip(self.tr_("lean_refresh_selected_hint"))
-        self.lean_selected_btn.clicked.connect(self._on_lean_refresh_selected)
-        btn_row.addWidget(self.lean_selected_btn)
         self.lean_selected_2y_btn = QPushButton(self.tr_("lean_refresh_selected_2y_btn"))
         self.lean_selected_2y_btn.setToolTip(self.tr_("lean_refresh_selected_2y_hint"))
         self.lean_selected_2y_btn.clicked.connect(self._on_lean_refresh_selected_2y)
@@ -671,10 +676,20 @@ class ConfigView(QWidget):
         self.lean_selected_all_btn.setToolTip(self.tr_("lean_refresh_selected_all_hint"))
         self.lean_selected_all_btn.clicked.connect(self._on_lean_refresh_selected_all)
         btn_row.addWidget(self.lean_selected_all_btn)
+        btn_row.addStretch()
+        card.body.addLayout(btn_row)
+
+        # The mentions jobs get their own row — with them the single row was
+        # wider than the card in Russian and the labels got clipped.
+        btn_row = QHBoxLayout()
         self.refetch_mentions_btn = QPushButton(self.tr_("lean_refetch_mentions_btn"))
         self.refetch_mentions_btn.setToolTip(self.tr_("lean_refetch_mentions_hint"))
         self.refetch_mentions_btn.clicked.connect(self._on_refetch_mentions_selected)
         btn_row.addWidget(self.refetch_mentions_btn)
+        self.mentions_oldest_btn = QPushButton(self.tr_("lean_mentions_oldest_btn", n=_MENTIONS_OLDEST_N))
+        self.mentions_oldest_btn.setToolTip(self.tr_("lean_mentions_oldest_hint", n=_MENTIONS_OLDEST_N))
+        self.mentions_oldest_btn.clicked.connect(self._on_mentions_oldest_clicked)
+        btn_row.addWidget(self.mentions_oldest_btn)
         btn_row.addStretch()
         card.body.addLayout(btn_row)
 
@@ -686,7 +701,7 @@ class ConfigView(QWidget):
         # in the cells (see refresh_lean_list), so edit triggers stay off but
         # the check state is still user-toggleable. Clicking any other column
         # header re-sorts the list (_on_lean_header_clicked).
-        self.lean_table = _LeanTable(0, 6)
+        self.lean_table = _LeanTable(0, 7)
         # Last ticked row per checkbox column — the anchor a Shift-click
         # ranges from; reset whenever the list is rebuilt/re-sorted.
         self._lean_anchor: dict[int, int | None] = {0: None, self._LEAN_ACCOUNT_COL: None}
@@ -703,6 +718,7 @@ class ConfigView(QWidget):
         self.lean_table.setColumnWidth(3, 140)
         self.lean_table.setColumnWidth(4, 110)
         self.lean_table.setColumnWidth(5, 96)
+        self.lean_table.setColumnWidth(6, 130)
         self.lean_table.itemChanged.connect(self._on_lean_item_changed)
         card.body.addWidget(self.lean_table)
 
@@ -713,7 +729,8 @@ class ConfigView(QWidget):
     _LEAN_VISIBLE_ROWS = 20
     # Table columns that re-sort the list when their header is clicked
     # (0 is the tick box). 4 (followers) defaults to descending, the rest asc.
-    _LEAN_SORT_COLS = (1, 2, 3, 4, 5)
+    _LEAN_SORT_COLS = (1, 2, 3, 4, 5, 6)
+    _LEAN_MENTIONS_COL = 6   # "<linked>/<names> (<days since refresh>d)"
     _LEAN_ACCOUNT_COL = 5   # tick = fetch this channel with the second account
 
     def _fit_lean_table_height(self, row_count: int) -> None:
@@ -730,10 +747,13 @@ class ConfigView(QWidget):
         self.lean_table.setHorizontalHeaderLabels([
             "", self.tr_("lean_refresh_col_updated"),
             self.tr_("lean_refresh_col_channel"), self.tr_("folder_export_col_folder"),
-            self.tr_("col_followers"), self.tr_("lean_refresh_col_account")])
-        header_item = self.lean_table.horizontalHeaderItem(self._LEAN_ACCOUNT_COL)
-        if header_item is not None:
-            header_item.setToolTip(self.tr_("lean_refresh_col_account_hint"))
+            self.tr_("col_followers"), self.tr_("lean_refresh_col_account"),
+            self.tr_("lean_refresh_col_mentions")])
+        for col, key in ((self._LEAN_ACCOUNT_COL, "lean_refresh_col_account_hint"),
+                         (self._LEAN_MENTIONS_COL, "lean_refresh_col_mentions_hint")):
+            header_item = self.lean_table.horizontalHeaderItem(col)
+            if header_item is not None:
+                header_item.setToolTip(self.tr_(key))
 
     def _on_lean_item_changed(self, item: QTableWidgetItem) -> None:
         """A checkbox was toggled. With Shift held, every row between the
@@ -769,7 +789,7 @@ class ConfigView(QWidget):
             self._lean_sort_desc = not self._lean_sort_desc
         else:
             self._lean_sort_col = col
-            self._lean_sort_desc = col in (4, 5)   # followers / 2nd-account-first read best high-first
+            self._lean_sort_desc = col in (4, 5)   # followers / 2nd-account-first read best high-first; mentions: never/oldest first
         self.refresh_lean_list()
 
     def _lean_sort_value(self, ch: dict, folder: str):
@@ -782,7 +802,20 @@ class ConfigView(QWidget):
             return int(ch.get("members", 0) or 0)
         if col == 5:
             return self.account_store.account_for_channel(ch["key"])
+        if col == 6:
+            return ch.get("mentions_refreshed_at") or ""   # never refreshed sorts first
         return ch.get("fetched_at") or ""   # col 1 (Updated); missing sorts first
+
+    def _mentions_cell(self, ch: dict, now: datetime) -> str:
+        """"<linked>/<names> (<days>d)": names found in the channel's stored
+        posts and how many of them sit next to a link (from the Ethics /
+        Mentions cache), and days since "Refresh mentions" last re-read the
+        links. "—" for any part not known yet."""
+        linked, names = ch.get("mentions_linked"), ch.get("mentions_names")
+        counts = f"{fmt_int(linked)}/{fmt_int(names)}" if linked is not None and names is not None else "—"
+        at = self._parse_fetched_at(ch.get("mentions_refreshed_at", ""))
+        days = f"{max(0, (now - at).days)}d" if at is not None else "—"
+        return f"{counts} ({days})"
 
     @staticmethod
     def _utcnow() -> datetime:
@@ -842,6 +875,9 @@ class ConfigView(QWidget):
                 if self.account_store.account_for_channel(ch["key"]) == SECOND_ACCOUNT
                 else Qt.CheckState.Unchecked)
             self.lean_table.setItem(i, self._LEAN_ACCOUNT_COL, acct)
+            mentions_item = QTableWidgetItem(self._mentions_cell(ch, now))
+            mentions_item.setToolTip(self.tr_("lean_refresh_col_mentions_hint"))
+            self.lean_table.setItem(i, self._LEAN_MENTIONS_COL, mentions_item)
         self.lean_table.blockSignals(False)
         hdr = self.lean_table.horizontalHeader()
         hdr.setSortIndicatorShown(self._lean_sort_col in self._LEAN_SORT_COLS)
@@ -1650,6 +1686,8 @@ class ConfigView(QWidget):
         self.lean_selected_all_btn.setToolTip(self.tr_("lean_refresh_selected_all_hint"))
         self.refetch_mentions_btn.setText(self.tr_("lean_refetch_mentions_btn"))
         self.refetch_mentions_btn.setToolTip(self.tr_("lean_refetch_mentions_hint"))
+        self.mentions_oldest_btn.setText(self.tr_("lean_mentions_oldest_btn", n=_MENTIONS_OLDEST_N))
+        self.mentions_oldest_btn.setToolTip(self.tr_("lean_mentions_oldest_hint", n=_MENTIONS_OLDEST_N))
         self.lean_empty_lbl.setText(self.tr_("lean_refresh_empty"))
         self._set_lean_headers()
         self.refresh_lean_list()
@@ -2026,6 +2064,33 @@ class ConfigView(QWidget):
         if not keys:
             QMessageBox.information(self, self.tr_("app_title"),
                                    self.tr_("lean_refresh_none_selected"))
+            return
+        if self.is_running():
+            QMessageBox.warning(self, self.tr_("app_title"), self.tr_("worker_running"))
+            return
+        reply = QMessageBox.question(
+            self, self.tr_("app_title"),
+            self.tr_("mentions_refresh_confirm", count=len(keys)))
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.mentions_refresh(keys)
+
+    def _mentions_oldest_keys(self, n: int = _MENTIONS_OLDEST_N) -> list[str]:
+        """The `n` channels whose mentions were refreshed longest ago. A
+        channel never refreshed (no `mentions_refreshed_at`) counts as the
+        oldest of all, and those go biggest-first (followers) — so with no
+        history yet this starts with the largest channels."""
+        rows = self.channel_store.list()
+        never = sorted((r for r in rows if not r.get("mentions_refreshed_at")),
+                       key=lambda r: int(r.get("members", 0) or 0), reverse=True)
+        stamped = sorted((r for r in rows if r.get("mentions_refreshed_at")),
+                         key=lambda r: r["mentions_refreshed_at"])
+        return [r["key"] for r in (never + stamped)[:n]]
+
+    def _on_mentions_oldest_clicked(self) -> None:
+        keys = self._mentions_oldest_keys()
+        if not keys:
+            QMessageBox.information(self, self.tr_("app_title"), self.tr_("lean_refresh_none"))
             return
         if self.is_running():
             QMessageBox.warning(self, self.tr_("app_title"), self.tr_("worker_running"))

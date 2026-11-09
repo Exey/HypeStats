@@ -46,6 +46,11 @@ from .theme import ACCENT_PRESETS, COLORS, ZOOM_LEVELS, default_accent, fs
 from .widgets import Card, SectionCard
 
 PERIOD_KEYS = ["2y", "3y", "all"]
+# Folders export: with the Rating columns on, each folder is ordered by Rating,
+# but a channel under this many followers never takes one of a folder's first
+# EXPORT_TOP_N places (a small channel's per-follower ratios flatter it).
+EXPORT_MIN_TOP_FOLLOWERS = 3400
+EXPORT_TOP_N = 20
 _MENTIONS_OLDEST_N = 10   # channels the "oldest mentions" button refreshes
 _THEME_PREFS = ["system", "light", "dark", "black"]
 
@@ -164,8 +169,8 @@ class ConfigView(QWidget):
         self._busy_btns = [self.fetch_btn, self.refresh_mentions_btn, self.refresh_comments_btn,
                            self.lean_1mo_btn, self.lean_3mo_btn,
                            self.lean_selected_btn, self.lean_selected_2y_btn,
-                           self.lean_selected_all_btn, self.refetch_mentions_btn,
-                           self.mentions_oldest_btn,
+                           self.lean_selected_all_btn,
+                           self.mentions_oldest_btn, self.mentions_selected_btn,
                            self.export_link_report_btn, self.export_mentions_report_btn,
                            self.folders_export_md_btn]
 
@@ -634,6 +639,17 @@ class ConfigView(QWidget):
         self.refresh_mentions_btn.setToolTip(self.tr_("folder_mentions_refresh_hint"))
         self.refresh_mentions_btn.clicked.connect(self._on_refresh_mentions_clicked)
         mentions_row.addWidget(self.refresh_mentions_btn)
+        # Same folder as the combo: re-reads the mentions of that folder's
+        # _MENTIONS_OLDEST_N least-recently-refreshed channels.
+        self.mentions_oldest_btn = QPushButton(self.tr_("lean_mentions_oldest_btn", n=_MENTIONS_OLDEST_N))
+        self.mentions_oldest_btn.setToolTip(self.tr_("lean_mentions_oldest_hint", n=_MENTIONS_OLDEST_N))
+        self.mentions_oldest_btn.clicked.connect(self._on_mentions_oldest_clicked)
+        mentions_row.addWidget(self.mentions_oldest_btn)
+        # Same mentions job, for the rows ticked in the table below.
+        self.mentions_selected_btn = QPushButton(self.tr_("lean_mentions_selected_btn"))
+        self.mentions_selected_btn.setToolTip(self.tr_("lean_mentions_selected_hint"))
+        self.mentions_selected_btn.clicked.connect(self._on_mentions_selected_clicked)
+        mentions_row.addWidget(self.mentions_selected_btn)
         card.body.addLayout(mentions_row)
 
         # "Refresh comments" (moved here from the Folders card): a lightweight
@@ -679,19 +695,6 @@ class ConfigView(QWidget):
         btn_row.addStretch()
         card.body.addLayout(btn_row)
 
-        # The mentions jobs get their own row — with them the single row was
-        # wider than the card in Russian and the labels got clipped.
-        btn_row = QHBoxLayout()
-        self.refetch_mentions_btn = QPushButton(self.tr_("lean_refetch_mentions_btn"))
-        self.refetch_mentions_btn.setToolTip(self.tr_("lean_refetch_mentions_hint"))
-        self.refetch_mentions_btn.clicked.connect(self._on_refetch_mentions_selected)
-        btn_row.addWidget(self.refetch_mentions_btn)
-        self.mentions_oldest_btn = QPushButton(self.tr_("lean_mentions_oldest_btn", n=_MENTIONS_OLDEST_N))
-        self.mentions_oldest_btn.setToolTip(self.tr_("lean_mentions_oldest_hint", n=_MENTIONS_OLDEST_N))
-        self.mentions_oldest_btn.clicked.connect(self._on_mentions_oldest_clicked)
-        btn_row.addWidget(self.mentions_oldest_btn)
-        btn_row.addStretch()
-        card.body.addLayout(btn_row)
 
         self.lean_empty_lbl = QLabel(self.tr_("lean_refresh_empty"))
         self.lean_empty_lbl.setObjectName("hint")
@@ -1299,6 +1302,9 @@ class ConfigView(QWidget):
             mode, target_key = self.folders_export_period_combo.currentData() or ("all", None)
             metrics_by_key = self._collect_export_metrics(summaries, mode, target_key)
 
+        if extra:
+            summaries = self._rank_export_rows(summaries, metrics_by_key)
+
         for ch in summaries:
             fid = self.folder_store.folder_for_channel(ch["key"])
             folder = folder_name.get(fid, self.tr_("folder_none"))
@@ -1339,6 +1345,30 @@ class ConfigView(QWidget):
                             str(round(quality))]
             lines.append("| " + " | ".join(row) + " |")
         return "\n".join(lines) + "\n"
+
+    def _rank_export_rows(self, summaries: list[dict], metrics_by_key: dict) -> list[dict]:
+        """`summaries` (already in folder order) with each folder's channels
+        ordered by Rating, best first — channels with no Rating last, ties by
+        followers — except that a channel under EXPORT_MIN_TOP_FOLLOWERS is
+        kept out of the folder's first EXPORT_TOP_N places: those go to the
+        best EXPORT_TOP_N channels that are big enough (in Rating order), and
+        everyone else follows from place EXPORT_TOP_N + 1, again by Rating.
+        A folder with fewer big channels than that simply lists them first."""
+        by_folder: dict = {}
+        for ch in summaries:   # dict keeps the folder order sorted_by_folder gave
+            by_folder.setdefault(self.folder_store.folder_for_channel(ch["key"]), []).append(ch)
+
+        def _rating(ch: dict) -> tuple:
+            m = metrics_by_key.get(ch["key"])
+            return (m is not None, m[0] if m is not None else 0.0, int(ch.get("members", 0) or 0))
+
+        out: list[dict] = []
+        for chans in by_folder.values():
+            ranked = sorted(chans, key=_rating, reverse=True)
+            top = [c for c in ranked if int(c.get("members", 0) or 0) >= EXPORT_MIN_TOP_FOLLOWERS][:EXPORT_TOP_N]
+            chosen = {c["key"] for c in top}
+            out += top + [c for c in ranked if c["key"] not in chosen]
+        return out
 
     def _collect_export_metrics(self, summaries: list[dict], mode: str,
                                 target_key: tuple | None) -> dict[str, tuple]:
@@ -1658,6 +1688,9 @@ class ConfigView(QWidget):
         self.folders_export_ethics_tags_chk.setToolTip(
             self.tr_("folder_export_ethics_tags_hint"))
         self.comments_refresh_lbl.setText(self.tr_("folder_comments_refresh_label"))
+        self.mentions_refresh_lbl.setText(self.tr_("folder_mentions_refresh_label"))
+        self.refresh_mentions_btn.setText(self.tr_("folder_mentions_refresh_btn"))
+        self.refresh_mentions_btn.setToolTip(self.tr_("folder_mentions_refresh_hint"))
         self.refresh_comments_btn.setText(self.tr_("folder_comments_refresh_btn"))
         self.refresh_comments_btn.setToolTip(self.tr_("folder_comments_refresh_hint"))
         self.assign_all_lbl.setText(self.tr_("folder_assign_all_label"))
@@ -1684,10 +1717,10 @@ class ConfigView(QWidget):
         self.lean_selected_2y_btn.setToolTip(self.tr_("lean_refresh_selected_2y_hint"))
         self.lean_selected_all_btn.setText(self.tr_("lean_refresh_selected_all_btn"))
         self.lean_selected_all_btn.setToolTip(self.tr_("lean_refresh_selected_all_hint"))
-        self.refetch_mentions_btn.setText(self.tr_("lean_refetch_mentions_btn"))
-        self.refetch_mentions_btn.setToolTip(self.tr_("lean_refetch_mentions_hint"))
         self.mentions_oldest_btn.setText(self.tr_("lean_mentions_oldest_btn", n=_MENTIONS_OLDEST_N))
         self.mentions_oldest_btn.setToolTip(self.tr_("lean_mentions_oldest_hint", n=_MENTIONS_OLDEST_N))
+        self.mentions_selected_btn.setText(self.tr_("lean_mentions_selected_btn"))
+        self.mentions_selected_btn.setToolTip(self.tr_("lean_mentions_selected_hint"))
         self.lean_empty_lbl.setText(self.tr_("lean_refresh_empty"))
         self._set_lean_headers()
         self.refresh_lean_list()
@@ -2055,15 +2088,29 @@ class ConfigView(QWidget):
             return
         self.mentions_refresh(keys)
 
-    def _on_refetch_mentions_selected(self) -> None:
-        """The Lean refresh table's checkbox-based counterpart to the
-        folder-scoped "Refresh mentions for:" row above — same underlying
-        tools.mentions_refresh job, just targeting whichever rows are
-        ticked in the staleness list instead of a whole folder."""
+    def _mentions_oldest_keys(self, folder_id: str | None = None,
+                              n: int = _MENTIONS_OLDEST_N) -> list[str]:
+        """The `n` channels (of `folder_id`'s, when given) whose mentions
+        were refreshed longest ago. A
+        channel never refreshed (no `mentions_refreshed_at`) counts as the
+        oldest of all, and those go biggest-first (followers) — so with no
+        history yet this starts with the largest channels."""
+        rows = self.channel_store.list()
+        if folder_id:
+            rows = [r for r in rows if self.folder_store.folder_for_channel(r["key"]) == folder_id]
+        never = sorted((r for r in rows if not r.get("mentions_refreshed_at")),
+                       key=lambda r: int(r.get("members", 0) or 0), reverse=True)
+        stamped = sorted((r for r in rows if r.get("mentions_refreshed_at")),
+                         key=lambda r: r["mentions_refreshed_at"])
+        return [r["key"] for r in (never + stamped)[:n]]
+
+    def _on_mentions_selected_clicked(self) -> None:
+        """Mentions refresh (tools.mentions_refresh — links only, no post
+        re-scan) for the rows ticked in the Lean refresh table."""
         keys = self._lean_checked_keys()
         if not keys:
             QMessageBox.information(self, self.tr_("app_title"),
-                                   self.tr_("lean_refresh_none_selected"))
+                                    self.tr_("lean_refresh_none_selected"))
             return
         if self.is_running():
             QMessageBox.warning(self, self.tr_("app_title"), self.tr_("worker_running"))
@@ -2075,22 +2122,14 @@ class ConfigView(QWidget):
             return
         self.mentions_refresh(keys)
 
-    def _mentions_oldest_keys(self, n: int = _MENTIONS_OLDEST_N) -> list[str]:
-        """The `n` channels whose mentions were refreshed longest ago. A
-        channel never refreshed (no `mentions_refreshed_at`) counts as the
-        oldest of all, and those go biggest-first (followers) — so with no
-        history yet this starts with the largest channels."""
-        rows = self.channel_store.list()
-        never = sorted((r for r in rows if not r.get("mentions_refreshed_at")),
-                       key=lambda r: int(r.get("members", 0) or 0), reverse=True)
-        stamped = sorted((r for r in rows if r.get("mentions_refreshed_at")),
-                         key=lambda r: r["mentions_refreshed_at"])
-        return [r["key"] for r in (never + stamped)[:n]]
-
     def _on_mentions_oldest_clicked(self) -> None:
-        keys = self._mentions_oldest_keys()
+        folder_id = self.mentions_folder_combo.currentData()
+        if not folder_id:
+            return
+        keys = self._mentions_oldest_keys(folder_id)
         if not keys:
-            QMessageBox.information(self, self.tr_("app_title"), self.tr_("lean_refresh_none"))
+            QMessageBox.information(self, self.tr_("app_title"),
+                                    self.tr_("folder_stat_empty_channels"))
             return
         if self.is_running():
             QMessageBox.warning(self, self.tr_("app_title"), self.tr_("worker_running"))
@@ -2143,7 +2182,14 @@ class ConfigView(QWidget):
             self.progress.setRange(0, 1)
             self.progress.setValue(1 if ok else 0)
         self.worker = None
+        if ok:
+            # Bring what was just refreshed to the top: the table is long
+            # (20 rows visible) and the refreshed channels — typically the
+            # biggest — sit far down the default oldest-update order, so the
+            # new Mentions values would be there but off-screen.
+            self._lean_sort_col, self._lean_sort_desc = self._LEAN_MENTIONS_COL, True
         self.refresh_lean_list()
+        self.lean_table.scrollToTop()
         if ok:
             self.checkpoints_changed.emit()
         else:

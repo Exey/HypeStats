@@ -217,7 +217,9 @@ The **Folders** and **Tags** cards sit at the top:
   and sort by folder. Also here: a **Markdown export** (one row per channel,
   optionally with per-period Rating / Views / Viral share, plus an **Ethics**
   column; the Rating carries a [year-over-year activity-decline
-  penalty](#activity-trend-abandonment)), with a **Calculate Ethics**
+  penalty](#activity-trend-abandonment)); with the Rating columns on, each
+  folder is ordered by Rating and a channel under 3 400 followers is kept out
+  of the folder's first 20 places), with a **Calculate Ethics**
   checkbox (folder selector + an **Only
   with Tags** filter) that scores any not-yet-cached channel in scope first —
   see [Mentions fairness (Ethics)](#mentions-fairness-ethics).

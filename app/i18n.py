@@ -78,14 +78,14 @@ EN = {
                                       "tag assigned (any tag).",
     "folder_export_col_ethics": "Ethics",
     "folder_mentions_refresh_label": "Refresh mentions for:",
-    "folder_mentions_refresh_btn": "🔗 Refresh mentions",
+    "folder_mentions_refresh_btn": "🔗 Refresh",
     "folder_mentions_refresh_hint": "Re-fetch just the links in every "
                                     "already-textual stored post in this "
                                     "folder's channels — much faster than a "
                                     "full re-fetch since it skips everything "
                                     "else.",
     "folder_comments_refresh_label": "Refresh comments for:",
-    "folder_comments_refresh_btn": "💬 Refresh comments",
+    "folder_comments_refresh_btn": "💬 Refresh",
     "folder_comments_refresh_hint": "Re-fetch just the comment count for "
                                     "every stored post in this folder's "
                                     "channels — much faster than a full "
@@ -130,11 +130,15 @@ EN = {
                                       "buttons, comments). Much slower than "
                                       "a 2-year re-fetch on a long-running "
                                       "channel.",
-    "lean_refetch_mentions_btn": "🔗 Refetch mentions",
-    "lean_mentions_oldest_btn": "🔗 Oldest {n} mentions",
-    "lean_mentions_oldest_hint": "Refetch mentions for the {n} channels whose "
-                                 "mentions were refreshed longest ago — never-"
-                                 "refreshed ones first, biggest channel first.",
+    "lean_mentions_oldest_btn": "🔗 Oldest {n}",
+    "lean_mentions_selected_btn": "🔗 Refresh selected",
+    "lean_mentions_selected_hint": "Refetch mentions (post links only — not a "
+                                   "re-scan of posts) for the channels ticked "
+                                   "in the table below.",
+    "lean_mentions_oldest_hint": "Refetch mentions for the {n} channels of the "
+                                 "selected folder whose mentions were "
+                                 "refreshed longest ago — never-refreshed "
+                                 "ones first, biggest channel first.",
     "lean_refresh_col_mentions": "Mentions",
     "lean_refresh_col_mentions_hint": "linked / names (days since refresh): "
                                       "names found in the channel's stored "
@@ -142,12 +146,6 @@ EN = {
                                       "then days since \"Refetch mentions\" "
                                       "last re-read its links. — = not known "
                                       "yet; refetching fills it in.",
-    "lean_refetch_mentions_hint": "Re-fetch just the links (see "
-                                  "tools.mentions_refresh) for the ticked "
-                                  "channels' already-textual stored posts — "
-                                  "same job as the folder-scoped \"Refresh "
-                                  "mentions for:\" row above, targeting the "
-                                  "ticked channels instead of a whole folder.",
     "mentions_refresh_confirm": "Refetch mention links for {count} channel(s)?",
     "lean_refresh_confirm": "Lean-refresh {count} channel(s)?",
     "lean_refresh_full_confirm": "Full re-fetch of {count} channel(s) over the "
@@ -943,14 +941,14 @@ RU = {
                                       "тег (любой).",
     "folder_export_col_ethics": "Этика",
     "folder_mentions_refresh_label": "Обновить ссылки для:",
-    "folder_mentions_refresh_btn": "🔗 Обновить ссылки",
+    "folder_mentions_refresh_btn": "🔗 Обновить",
     "folder_mentions_refresh_hint": "Заново получить только ссылки для "
                                     "каждого уже текстового сохранённого "
                                     "поста в каналах этой папки — намного "
                                     "быстрее полной перезагрузки, так как "
                                     "остальное не трогает.",
     "folder_comments_refresh_label": "Обновить комментарии для:",
-    "folder_comments_refresh_btn": "💬 Обновить комментарии",
+    "folder_comments_refresh_btn": "💬 Обновить",
     "folder_comments_refresh_hint": "Заново получить только число "
                                     "комментариев для каждого сохранённого "
                                     "поста в каналах этой папки — намного "
@@ -992,22 +990,21 @@ RU = {
                                       "(репосты, кнопки, комментарии). "
                                       "Гораздо медленнее пересканирования за "
                                       "2 года для канала с долгой историей.",
-    "lean_refetch_mentions_btn": "🔗 Обновить упоминания",
-    "lean_mentions_oldest_btn": "🔗 {n} старых упоминаний",
-    "lean_mentions_oldest_hint": "Обновить упоминания у {n} каналов, где они "
-                                 "обновлялись давнее всего — сначала ещё ни "
-                                 "разу не обновлявшиеся, самые крупные первыми.",
+    "lean_mentions_oldest_btn": "🔗 Старые {n}",
+    "lean_mentions_selected_btn": "🔗 Обновить выбранные",
+    "lean_mentions_selected_hint": "Обновить упоминания (только ссылки в "
+                                   "постах, без пересканирования постов) у "
+                                   "каналов, отмеченных в таблице ниже.",
+    "lean_mentions_oldest_hint": "Обновить упоминания у {n} каналов выбранной "
+                                 "папки, где они обновлялись давнее всего — "
+                                 "сначала ещё ни разу не обновлявшиеся, самые "
+                                 "крупные первыми.",
     "lean_refresh_col_mentions": "Упоминания",
     "lean_refresh_col_mentions_hint": "со ссылкой / имён (дней с обновления): "
                                       "имена в сохранённых постах канала и "
                                       "сколько из них со ссылкой, затем дни с "
                                       "последнего «Обновить упоминания». — = "
                                       "пока неизвестно; обновление заполнит.",
-    "lean_refetch_mentions_hint": "Заново получить только ссылки для уже "
-                                  "текстовых сохранённых постов отмеченных "
-                                  "каналов — та же задача, что и строка "
-                                  "«Обновить ссылки для:» выше, но для "
-                                  "отмеченных каналов вместо целой папки.",
     "mentions_refresh_confirm": "Обновить ссылки упоминаний для {count} канал(ов)?",
     "lean_refresh_confirm": "Обновить {count} канал(ов)?",
     "lean_refresh_full_confirm": "Полное пересканирование {count} канал(ов) за "
